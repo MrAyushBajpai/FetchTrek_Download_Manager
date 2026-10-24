@@ -7,4 +7,4 @@ edition = "2021"
 fetchtrek-types = { path = "../fetchtrek-types" }
 fetchtrek-storage = { path = "../fetchtrek-storage" }
 async-trait = "0.1"
-tokio = { version = "1", features = ["io-util"] }
+tokio = { version = "1", features = ["io-util", "rt", "macros", "time"] }
