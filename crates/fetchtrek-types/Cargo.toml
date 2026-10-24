@@ -7,5 +7,7 @@ edition = "2021"
 default = ["alloc"]
 alloc = []
 std = ["alloc"]
+serde = ["dep:serde"]
 
 [dependencies]
+serde = { version = "1.0", default-features = false, optional = true }
