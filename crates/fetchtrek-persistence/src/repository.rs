@@ -135,7 +135,7 @@ impl SegmentCheckpoint {
     }
 }
 
-fn map_task_row(row: &Row<'_>) -> rusqlite::Result<TaskRecord> {
+pub(crate) fn map_task_row(row: &Row<'_>) -> rusqlite::Result<TaskRecord> {
     let id: i64 = row.get(0)?;
     let uuid: String = row.get(1)?;
     let url: String = row.get(2)?;
@@ -590,5 +590,11 @@ impl<'a> TaskRepository<'a> {
     ) -> Result<(), PersistenceError> {
         self.db
             .checkpoint_progress(task_id, downloaded_bytes, segments)
+    }
+
+    pub fn recover_interrupted_tasks(
+        &self,
+    ) -> Result<Vec<crate::recovery::RecoveredTask>, PersistenceError> {
+        self.db.recover_interrupted_tasks()
     }
 }

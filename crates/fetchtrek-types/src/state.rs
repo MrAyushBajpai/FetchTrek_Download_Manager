@@ -15,6 +15,10 @@ pub enum TaskState {
 }
 
 impl TaskState {
+    pub const ACTIVE: TaskState = TaskState::Transferring;
+    #[allow(non_upper_case_globals)]
+    pub const Active: TaskState = TaskState::Transferring;
+
     pub const fn as_u8(&self) -> u8 {
         *self as u8
     }
