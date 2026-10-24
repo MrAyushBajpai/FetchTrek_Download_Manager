@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use fetchtrek_core::{BandwidthLimiter, NetworkTransport};
 use fetchtrek_ipc::{
     decode_request, default_endpoint, encode_response, encode_telemetry, read_frame, write_frame,
-    IpcFrame, IpcRequest, IpcResponse, IpcServer, IpcStream, TaskProgress, TaskSummary,
-    TelemetryBroadcaster, TelemetrySnapshot, OP_PING, TELEMETRY_INTERVAL_MS,
+    IpcFrame, IpcRequest, IpcResponse, IpcServer, IpcStream, TaskSummary, TelemetryBroadcaster,
+    OP_PING, TELEMETRY_INTERVAL_MS,
 };
 use fetchtrek_persistence::{
     default_vault, CredentialVault, Database, PersistenceError, TaskRecord,
@@ -17,6 +17,7 @@ use fetchtrek_types::TaskState;
 use tokio::sync::{broadcast, Mutex};
 use tokio::task::JoinHandle;
 
+use crate::controller::TaskController;
 use crate::error::DaemonError;
 
 #[derive(Debug, Clone)]
@@ -64,12 +65,13 @@ impl Default for DaemonConfig {
 
 pub struct DaemonEngine {
     pub config: DaemonConfig,
-    pub database: std::sync::Mutex<Database>,
+    pub database: Arc<std::sync::Mutex<Database>>,
     pub memory_pool: Arc<SlabPool>,
     pub storage: Arc<PositionalStorage>,
     pub limiter: Arc<BandwidthLimiter>,
     pub transport: Arc<dyn NetworkTransport>,
     pub vault: Arc<dyn CredentialVault>,
+    pub controller: Arc<TaskController>,
     pub shutdown_tx: broadcast::Sender<()>,
     accept_handle: Mutex<Option<JoinHandle<()>>>,
     telemetry_handle: Mutex<Option<JoinHandle<()>>>,
@@ -97,29 +99,42 @@ impl DaemonEngine {
         let transport: Arc<dyn NetworkTransport> = Arc::new(HttpTransport::new());
         let vault: Arc<dyn CredentialVault> = Arc::from(default_vault(None));
 
-        // 5. Bind IPC Server to configured endpoint
+        // 5. Shared DB & Task Controller
+        let db_arc = Arc::new(std::sync::Mutex::new(db));
+        let controller = Arc::new(TaskController::new(
+            Arc::clone(&db_arc),
+            Arc::clone(&storage),
+            Arc::clone(&memory_pool),
+            Arc::clone(&limiter),
+            Arc::clone(&transport),
+            config.max_active_tasks,
+            config.data_dir.clone(),
+        ));
+
+        // 6. Bind IPC Server to configured endpoint
         let endpoint = config.ipc_endpoint.clone().unwrap_or_else(default_endpoint);
         let mut server = IpcServer::bind(&endpoint)?;
 
-        // 6. Broadcast channels
+        // 7. Broadcast channels
         let (shutdown_tx, _) = broadcast::channel::<()>(16);
         let (telemetry_tx, _) = broadcast::channel::<IpcFrame>(64);
 
         let engine = Arc::new(Self {
             config,
-            database: std::sync::Mutex::new(db),
+            database: db_arc,
             memory_pool,
             storage,
             limiter,
             transport,
             vault,
+            controller,
             shutdown_tx: shutdown_tx.clone(),
             accept_handle: Mutex::new(None),
             telemetry_handle: Mutex::new(None),
         });
 
-        // 7. Spawn 10 Hz Telemetry broadcast emitter
-        let telemetry_engine = Arc::clone(&engine);
+        // 8. Spawn 10 Hz Telemetry broadcast emitter
+        let telemetry_controller = Arc::clone(&engine.controller);
         let mut telemetry_shutdown_rx = shutdown_tx.subscribe();
         let telemetry_tx_clone = telemetry_tx.clone();
 
@@ -140,34 +155,10 @@ impl DaemonEngine {
                             .as_millis() as u64;
 
                         if broadcaster.should_emit(now_ms) {
-                            let active_tasks = {
-                                if let Ok(db) = telemetry_engine.database.lock() {
-                                    db.list_tasks(Some(TaskState::Transferring)).unwrap_or_default()
-                                } else {
-                                    Vec::new()
+                            if let Ok(snapshot) = telemetry_controller.collect_telemetry().await {
+                                if let Ok(frame) = encode_telemetry(&snapshot) {
+                                    let _ = telemetry_tx_clone.send(frame);
                                 }
-                            };
-
-                            let active_count = active_tasks.len() as u32;
-                            let tasks = active_tasks.into_iter().map(|t| TaskProgress {
-                                task_id: t.id,
-                                downloaded_bytes: t.downloaded_bytes,
-                                total_bytes: t.total_bytes,
-                                speed_bps: 0,
-                                active_connections: 0,
-                                status: t.status,
-                            }).collect();
-
-                            let snapshot = TelemetrySnapshot {
-                                timestamp_ms: now_ms,
-                                global_download_speed_bps: 0,
-                                global_upload_speed_bps: 0,
-                                active_task_count: active_count,
-                                tasks,
-                            };
-
-                            if let Ok(frame) = encode_telemetry(&snapshot) {
-                                let _ = telemetry_tx_clone.send(frame);
                             }
                         }
                     }
@@ -175,7 +166,7 @@ impl DaemonEngine {
             }
         });
 
-        // 8. Spawn IPC client accept loop
+        // 9. Spawn IPC client accept loop
         let accept_engine = Arc::clone(&engine);
         let mut accept_shutdown_rx = shutdown_tx.subscribe();
         let accept_shutdown_tx = shutdown_tx.clone();
@@ -221,7 +212,20 @@ impl DaemonEngine {
         // 1. Broadcast shutdown signal to all listeners
         let _ = self.shutdown_tx.send(());
 
-        // 2. Await background tasks termination
+        // 2. Pause active downloads in controller
+        let active_ids: Vec<i64> = self
+            .controller
+            .active_sessions
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
+        for id in active_ids {
+            let _ = self.controller.pause_task(id).await;
+        }
+
+        // 3. Await background tasks termination
         if let Some(handle) = self.accept_handle.lock().await.take() {
             let _ = handle.await;
         }
@@ -229,7 +233,7 @@ impl DaemonEngine {
             let _ = handle.await;
         }
 
-        // 3. Flush pending database micro-transactions and truncate WAL
+        // 4. Flush pending database micro-transactions and truncate WAL
         let db = self
             .database
             .lock()
@@ -300,7 +304,7 @@ async fn handle_client_connection(
             inbound_opt = inbound_rx.recv() => {
                 match inbound_opt {
                     Some(frame) => {
-                        let resp_frame = dispatch_ipc_frame(&engine, &frame);
+                        let resp_frame = dispatch_ipc_frame(&engine, &frame).await;
                         if outbound_tx.send(resp_frame).await.is_err() {
                             break;
                         }
@@ -322,10 +326,97 @@ async fn handle_client_connection(
     let _ = writer_task.await;
 }
 
-fn dispatch_ipc_frame(engine: &DaemonEngine, frame: &IpcFrame) -> IpcFrame {
+async fn dispatch_ipc_frame(engine: &DaemonEngine, frame: &IpcFrame) -> IpcFrame {
     let correlation_id = frame.header.correlation_id;
     let (resp, corr) = match decode_request(frame) {
         Ok((IpcRequest::Ping, corr)) => (IpcResponse::Pong, corr),
+        Ok((
+            IpcRequest::AddTask {
+                url,
+                destination_path,
+                filename,
+                connections,
+            },
+            corr,
+        )) => {
+            match engine
+                .controller
+                .add_task(
+                    &url,
+                    destination_path.as_deref(),
+                    filename.as_deref(),
+                    connections,
+                )
+                .await
+            {
+                Ok(task) => (
+                    IpcResponse::TaskCreated {
+                        task_id: task.id,
+                        uuid: task.uuid,
+                    },
+                    corr,
+                ),
+                Err(e) => (
+                    IpcResponse::Error {
+                        code: 500,
+                        message: e.to_string(),
+                    },
+                    corr,
+                ),
+            }
+        }
+        Ok((IpcRequest::PauseTask { task_id }, corr)) => {
+            match engine.controller.pause_task(task_id).await {
+                Ok(()) => (
+                    IpcResponse::TaskUpdated {
+                        task_id,
+                        status: TaskState::Paused,
+                    },
+                    corr,
+                ),
+                Err(e) => (
+                    IpcResponse::Error {
+                        code: 500,
+                        message: e.to_string(),
+                    },
+                    corr,
+                ),
+            }
+        }
+        Ok((IpcRequest::ResumeTask { task_id }, corr)) => {
+            match engine.controller.resume_task(task_id).await {
+                Ok(()) => (
+                    IpcResponse::TaskUpdated {
+                        task_id,
+                        status: TaskState::Active,
+                    },
+                    corr,
+                ),
+                Err(e) => (
+                    IpcResponse::Error {
+                        code: 500,
+                        message: e.to_string(),
+                    },
+                    corr,
+                ),
+            }
+        }
+        Ok((
+            IpcRequest::CancelTask {
+                task_id,
+                delete_file,
+            },
+            corr,
+        )) => match engine.controller.cancel_task(task_id, delete_file).await {
+            Ok(()) => (IpcResponse::TaskCancelled { task_id }, corr),
+            Err(e) => (
+                IpcResponse::Error {
+                    code: 500,
+                    message: e.to_string(),
+                },
+                corr,
+            ),
+        },
         Ok((IpcRequest::ListTasks { status_filter }, corr)) => {
             let res = engine
                 .database
@@ -375,13 +466,6 @@ fn dispatch_ipc_frame(engine: &DaemonEngine, frame: &IpcFrame) -> IpcFrame {
                 ),
             }
         }
-        Ok((_, corr)) => (
-            IpcResponse::Error {
-                code: 400,
-                message: "Operation not yet implemented".to_string(),
-            },
-            corr,
-        ),
         Err(_) if frame.header.message_id == OP_PING => (IpcResponse::Pong, correlation_id),
         Err(e) => (
             IpcResponse::Error {
