@@ -9,4 +9,6 @@ fetchtrek-ipc = { path = "../../crates/fetchtrek-ipc" }
 fetchtrek-storage = { path = "../../crates/fetchtrek-storage" }
 fetchtrek-persistence = { path = "../../crates/fetchtrek-persistence" }
 fetchtrek-core = { path = "../../crates/fetchtrek-core" }
-fetchtrek-protocols = { path = "../../crates/fetchtrek-protocols" }
+fetchtrek-protocols = { path = "../../crates/fetchtrek-protocols", features = ["http"] }
+tokio = { version = "1", features = ["full"] }
+thiserror = "1.0"
