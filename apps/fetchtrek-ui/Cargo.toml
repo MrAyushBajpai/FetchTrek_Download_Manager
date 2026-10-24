@@ -1,0 +1,8 @@
+[package]
+name = "fetchtrek-ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fetchtrek-types = { path = "../../crates/fetchtrek-types" }
+fetchtrek-ipc = { path = "../../crates/fetchtrek-ipc" }

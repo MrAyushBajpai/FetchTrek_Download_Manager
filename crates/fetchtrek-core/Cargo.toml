@@ -1,0 +1,8 @@
+[package]
+name = "fetchtrek-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fetchtrek-types = { path = "../fetchtrek-types" }
+fetchtrek-storage = { path = "../fetchtrek-storage" }

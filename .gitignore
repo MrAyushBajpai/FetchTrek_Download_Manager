@@ -127,3 +127,10 @@ storage/temp/
 *.tmp
 *.bak
 *.swp
+
+# --- Rust Build Outputs ---
+target/
+**/*.rs.bk
+*.profraw
+Cargo.lock
+

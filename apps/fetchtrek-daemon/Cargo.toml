@@ -1,0 +1,12 @@
+[package]
+name = "fetchtrek-daemon"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fetchtrek-types = { path = "../../crates/fetchtrek-types" }
+fetchtrek-ipc = { path = "../../crates/fetchtrek-ipc" }
+fetchtrek-storage = { path = "../../crates/fetchtrek-storage" }
+fetchtrek-persistence = { path = "../../crates/fetchtrek-persistence" }
+fetchtrek-core = { path = "../../crates/fetchtrek-core" }
+fetchtrek-protocols = { path = "../../crates/fetchtrek-protocols" }

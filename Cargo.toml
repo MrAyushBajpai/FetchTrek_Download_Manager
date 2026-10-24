@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/fetchtrek-types",
+    "crates/fetchtrek-ipc",
+    "crates/fetchtrek-storage",
+    "crates/fetchtrek-persistence",
+    "crates/fetchtrek-core",
+    "crates/fetchtrek-protocols",
+    "apps/fetchtrek-daemon",
+    "apps/fetchtrek-ui",
+    "apps/fetchtrek-cli",
+    "apps/fetchtrek-host",
+]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = false
+
+[profile.release-dist]
+inherits = "release"
+lto = "fat"
+
+[profile.dev.package."*"]
+opt-level = 2
