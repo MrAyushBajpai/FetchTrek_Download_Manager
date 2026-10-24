@@ -10,6 +10,7 @@ use fetchtrek_types::{
 use tokio::io::AsyncReadExt;
 
 use crate::scheduler::SegmentScheduler;
+use crate::throttle::BandwidthLimiter;
 use crate::transport::{NetworkTransport, SessionContext};
 
 #[derive(Debug, Clone)]
@@ -19,6 +20,7 @@ pub struct DownloadConfig {
     pub connections: usize,
     pub context: SessionContext,
     pub min_split_size: u64,
+    pub rate_limiter: Option<Arc<BandwidthLimiter>>,
 }
 
 impl DownloadConfig {
@@ -29,6 +31,7 @@ impl DownloadConfig {
             connections: 4,
             context: SessionContext::default(),
             min_split_size: 64 * 1024,
+            rate_limiter: None,
         }
     }
 
@@ -44,6 +47,11 @@ impl DownloadConfig {
 
     pub fn with_min_split_size(mut self, size: u64) -> Self {
         self.min_split_size = size;
+        self
+    }
+
+    pub fn with_rate_limiter(mut self, limiter: Arc<BandwidthLimiter>) -> Self {
+        self.rate_limiter = Some(limiter);
         self
     }
 }
@@ -193,6 +201,7 @@ impl DownloadCoordinator {
             let scheduler = Arc::clone(&scheduler);
             let bytes_ingested = Arc::clone(&self.bytes_ingested);
             let active_connections = Arc::clone(&self.active_connections);
+            let rate_limiter = config.rate_limiter.clone();
 
             let url = config.url.clone();
             let dest = config.destination.clone();
@@ -276,6 +285,10 @@ impl DownloadCoordinator {
                                 return Err(FetchTrekError::Network(NetworkError::SocketTimeout));
                             }
                         };
+
+                        if let Some(ref limiter) = rate_limiter {
+                            limiter.acquire(n).await;
+                        }
 
                         slab.valid_bytes = n;
 
