@@ -61,6 +61,7 @@ pub struct DownloadSummary {
     pub destination: PathBuf,
     pub total_bytes: u64,
     pub final_state: TaskState,
+    pub finalization_duration: std::time::Duration,
 }
 
 pub struct DownloadCoordinator {
@@ -164,6 +165,7 @@ impl DownloadCoordinator {
                 destination: config.destination,
                 total_bytes: 0,
                 final_state: TaskState::Completed,
+                finalization_duration: std::time::Duration::ZERO,
             });
         }
 
@@ -326,6 +328,7 @@ impl DownloadCoordinator {
         }
 
         // Phase 4: Instant Finalization
+        let finalize_start = std::time::Instant::now();
         let _ = self.apply_event(TaskEvent::LastByteFlushed);
 
         if let Err(e) = self
@@ -339,11 +342,13 @@ impl DownloadCoordinator {
         }
 
         let _ = self.apply_event(TaskEvent::DirectFinalize);
+        let finalization_duration = finalize_start.elapsed();
 
         Ok(DownloadSummary {
             destination: config.destination,
             total_bytes,
             final_state: TaskState::Completed,
+            finalization_duration,
         })
     }
 }

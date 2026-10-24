@@ -87,17 +87,10 @@ impl AsyncStorage for PositionalStorage {
     ) -> Result<(), StorageError> {
         let dest = destination.to_path_buf();
         tokio::task::spawn_blocking(move || {
-            let file = OpenOptions::new()
-                .write(true)
-                .open(&dest)
-                .map_err(map_io_error)?;
-
-            let actual_len = file.metadata().map_err(map_io_error)?.len();
-            if actual_len != expected_bytes {
+            let meta = std::fs::metadata(&dest).map_err(map_io_error)?;
+            if meta.len() != expected_bytes {
                 return Err(StorageError::AllocationFailed);
             }
-
-            file.sync_data().map_err(map_io_error)?;
             Ok(())
         })
         .await
