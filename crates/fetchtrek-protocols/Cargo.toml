@@ -3,6 +3,19 @@ name = "fetchtrek-protocols"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["http"]
+http = ["dep:reqwest", "dep:tokio-util", "dep:futures-util"]
+
 [dependencies]
 fetchtrek-types = { path = "../fetchtrek-types" }
 fetchtrek-core = { path = "../fetchtrek-core" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "macros"] }
+
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "stream",
+], optional = true }
+tokio-util = { version = "0.7", features = ["io"], optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
