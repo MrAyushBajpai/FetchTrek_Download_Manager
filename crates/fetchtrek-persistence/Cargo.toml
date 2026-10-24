@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 fetchtrek-types = { path = "../fetchtrek-types" }
+rusqlite = { version = "0.31", features = ["bundled"] }
+thiserror = "1.0"
