@@ -3,4 +3,9 @@ name = "fetchtrek-types"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["alloc"]
+alloc = []
+std = ["alloc"]
+
 [dependencies]
