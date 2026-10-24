@@ -1,1 +1,3 @@
-//! Positional asynchronous disk storage and pre-allocation.
+pub mod memory;
+
+pub use memory::{LeasedSlab, SlabBuffer, SlabPool, SLAB_SIZE, TOTAL_SLABS};

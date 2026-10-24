@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 fetchtrek-types = { path = "../fetchtrek-types" }
+crossbeam-queue = "0.3"
