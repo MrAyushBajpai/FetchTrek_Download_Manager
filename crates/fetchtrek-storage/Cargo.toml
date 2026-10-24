@@ -6,3 +6,14 @@ edition = "2021"
 [dependencies]
 fetchtrek-types = { path = "../fetchtrek-types" }
 crossbeam-queue = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
