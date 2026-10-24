@@ -284,6 +284,7 @@ fn test_error_classification_and_recovery() {
         StorageError::PathNotFound,
         StorageError::ChecksumMismatch,
         StorageError::IoFailure,
+        StorageError::AllocationFailed,
     ];
     for err in storage_errors {
         assert_eq!(err.classification(), ErrorClassification::TerminalFault);

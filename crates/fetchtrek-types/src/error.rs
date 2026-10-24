@@ -74,6 +74,7 @@ pub enum StorageError {
     PathNotFound,
     ChecksumMismatch,
     IoFailure,
+    AllocationFailed,
 }
 
 impl StorageError {
@@ -94,6 +95,9 @@ impl fmt::Display for StorageError {
             Self::PathNotFound => write!(f, "destination path not found"),
             Self::ChecksumMismatch => write!(f, "block checksum verification failed"),
             Self::IoFailure => write!(f, "positional storage I/O failure"),
+            Self::AllocationFailed => {
+                write!(f, "storage pre-allocation or file finalization failed")
+            }
         }
     }
 }
