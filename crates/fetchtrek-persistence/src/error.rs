@@ -17,4 +17,7 @@ pub enum PersistenceError {
 
     #[error("Schema migration error: {0}")]
     Migration(String),
+
+    #[error("Credential vault error: {0}")]
+    Vault(String),
 }
