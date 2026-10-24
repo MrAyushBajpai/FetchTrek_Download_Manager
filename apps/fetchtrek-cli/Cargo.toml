@@ -6,3 +6,10 @@ edition = "2021"
 [dependencies]
 fetchtrek-types = { path = "../../crates/fetchtrek-types" }
 fetchtrek-ipc = { path = "../../crates/fetchtrek-ipc" }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4.4", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+fetchtrek-daemon = { path = "../fetchtrek-daemon" }
+fetchtrek-persistence = { path = "../../crates/fetchtrek-persistence" }
