@@ -5,3 +5,8 @@ edition = "2021"
 
 [dependencies]
 fetchtrek-types = { path = "../fetchtrek-types" }
+tokio = { version = "1", features = ["io-util", "net", "sync", "macros", "rt", "time"] }
+thiserror = "1.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
