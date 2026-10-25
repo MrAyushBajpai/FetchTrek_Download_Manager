@@ -26,10 +26,22 @@ pub struct ActiveTaskSession {
     pub uuid: String,
     pub cancel_tx: watch::Sender<bool>,
     pub downloaded_bytes: Arc<AtomicU64>,
+    pub bytes_received: Arc<AtomicU64>,
+    pub bytes_committed: Arc<AtomicU64>,
     pub speed_bps: Arc<AtomicU64>,
     pub active_connections: Arc<AtomicU16>,
     pub context: Arc<SessionContext>,
     pub join_handle: Option<JoinHandle<Result<(), DaemonError>>>,
+}
+
+impl ActiveTaskSession {
+    pub fn progress_percent(&self, total_bytes: u64) -> f32 {
+        if total_bytes == 0 {
+            return 0.0;
+        }
+        let committed = self.bytes_committed.load(Ordering::Acquire);
+        ((committed as f64 / total_bytes as f64) * 100.0).clamp(0.0, 100.0) as f32
+    }
 }
 
 pub fn detect_stream_protocol(url: &str, mime_type: Option<&str>) -> Option<&'static str> {
@@ -211,6 +223,7 @@ pub struct TaskController {
     pub task_contexts: Arc<RwLock<HashMap<i64, Arc<SessionContext>>>>,
     pub max_concurrent_tasks: usize,
     pub default_download_dir: PathBuf,
+    pub transition_locks: Arc<tokio::sync::Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 impl TaskController {
@@ -233,7 +246,16 @@ impl TaskController {
             task_contexts: Arc::new(RwLock::new(HashMap::new())),
             max_concurrent_tasks,
             default_download_dir,
+            transition_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
+    }
+
+    pub async fn acquire_task_lock(&self, task_id: i64) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.transition_locks.lock().await;
+        locks
+            .entry(task_id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     pub async fn add_task(
@@ -397,6 +419,9 @@ impl TaskController {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), DaemonError>> + Send>> {
         let self_clone = Arc::clone(self);
         Box::pin(async move {
+            let task_lock = self_clone.acquire_task_lock(task_id).await;
+            let _guard = task_lock.lock().await;
+
             let task = {
                 let db = self_clone
                     .database
@@ -449,6 +474,8 @@ impl TaskController {
             let task_context = Arc::new(task_context_obj);
             let (cancel_tx, cancel_rx) = watch::channel(false);
             let downloaded_bytes = Arc::new(AtomicU64::new(task.downloaded_bytes));
+            let bytes_received = Arc::new(AtomicU64::new(0));
+            let bytes_committed = Arc::clone(&downloaded_bytes);
             let speed_bps = Arc::new(AtomicU64::new(0));
             let active_connections = Arc::new(AtomicU16::new(0));
 
@@ -468,7 +495,9 @@ impl TaskController {
                     task_id,
                     uuid: task.uuid,
                     cancel_tx,
-                    downloaded_bytes,
+                    downloaded_bytes: Arc::clone(&downloaded_bytes),
+                    bytes_received: Arc::clone(&downloaded_bytes),
+                    bytes_committed: Arc::clone(&downloaded_bytes),
                     speed_bps,
                     active_connections,
                     context: task_context,
@@ -499,7 +528,9 @@ impl TaskController {
                     task_id,
                     uuid: task.uuid,
                     cancel_tx,
-                    downloaded_bytes,
+                    downloaded_bytes: Arc::clone(&downloaded_bytes),
+                    bytes_received: Arc::clone(&downloaded_bytes),
+                    bytes_committed: Arc::clone(&downloaded_bytes),
                     speed_bps,
                     active_connections,
                     context: task_context,
@@ -571,6 +602,8 @@ impl TaskController {
             let total_bytes = task.total_bytes;
             let url_clone = task.url.clone();
             let downloaded_bytes_clone = Arc::clone(&downloaded_bytes);
+            let bytes_received_clone = Arc::clone(&bytes_received);
+            let bytes_committed_clone = Arc::clone(&bytes_committed);
             let speed_bps_clone = Arc::clone(&speed_bps);
             let active_conns_clone = Arc::clone(&active_connections);
             let cancel_rx_task = cancel_rx.clone();
@@ -593,6 +626,8 @@ impl TaskController {
                     let limiter = Arc::clone(&controller_clone.limiter);
                     let active_conns = Arc::clone(&active_conns_clone);
                     let downloaded_bytes = Arc::clone(&downloaded_bytes_clone);
+                    let bytes_received_worker = Arc::clone(&bytes_received_clone);
+                    let bytes_committed_worker = Arc::clone(&bytes_committed_clone);
                     let cursor_clone = Arc::clone(cursor);
                     let mut cancel_rx_worker = cancel_rx_task.clone();
                     let url = url_clone.clone();
@@ -683,6 +718,7 @@ impl TaskController {
                                             if bytes_read_from_stream > expected_stream_len {
                                                 return Err(DaemonError::Internal("Stream delivered more bytes than requested range".to_string()));
                                             }
+                                            bytes_received_worker.fetch_add(n as u64, Ordering::Relaxed);
                                             n
                                         }
                                         Err(e) => return Err(DaemonError::Internal(format!("Read error: {}", e))),
@@ -701,6 +737,7 @@ impl TaskController {
                                 .map_err(DaemonError::Storage)?;
 
                             cursor_clone.advance_cursor(n as u64);
+                            bytes_committed_worker.fetch_add(n as u64, Ordering::Relaxed);
                             downloaded_bytes.fetch_add(n as u64, Ordering::Relaxed);
                         }
 
@@ -712,7 +749,8 @@ impl TaskController {
 
                 // Spawn progress & SQLite micro-transaction ticker (1,000ms cadence)
                 let progress_database = Arc::clone(&controller_clone.database);
-                let progress_downloaded = Arc::clone(&downloaded_bytes_clone);
+                let progress_received = Arc::clone(&bytes_received_clone);
+                let progress_committed = Arc::clone(&bytes_committed_clone);
                 let progress_speed = Arc::clone(&speed_bps_clone);
                 let mut progress_cancel = cancel_rx_task.clone();
                 let cursors_for_progress = cursors_for_workers.clone();
@@ -720,7 +758,7 @@ impl TaskController {
                 let progress_handle = tokio::spawn(async move {
                     let mut interval =
                         tokio::time::interval(tokio::time::Duration::from_millis(1000));
-                    let mut last_bytes = progress_downloaded.load(Ordering::Acquire);
+                    let mut last_received = progress_received.load(Ordering::Acquire);
 
                     loop {
                         tokio::select! {
@@ -730,10 +768,17 @@ impl TaskController {
                                 }
                             }
                             _ = interval.tick() => {
-                                let cur_bytes = progress_downloaded.load(Ordering::Acquire);
-                                let delta = cur_bytes.saturating_sub(last_bytes);
-                                last_bytes = cur_bytes;
+                                let cur_received = progress_received.load(Ordering::Acquire);
+                                let delta = cur_received.saturating_sub(last_received);
+                                last_received = cur_received;
                                 progress_speed.store(delta, Ordering::Release);
+
+                                let cur_committed = progress_committed.load(Ordering::Acquire);
+                                let clamped_committed = if total_bytes > 0 {
+                                    cur_committed.min(total_bytes)
+                                } else {
+                                    cur_committed
+                                };
 
                                 let checkpoints: Vec<SegmentCheckpoint> = cursors_for_progress
                                     .iter()
@@ -745,7 +790,7 @@ impl TaskController {
                                     .collect();
 
                                 if let Ok(db) = progress_database.lock() {
-                                    let _ = db.checkpoint_progress(task_id, cur_bytes, &checkpoints);
+                                    let _ = db.checkpoint_progress(task_id, clamped_committed, &checkpoints);
                                 }
                             }
                         }
@@ -875,7 +920,9 @@ impl TaskController {
                 task_id,
                 uuid: task.uuid,
                 cancel_tx,
-                downloaded_bytes,
+                downloaded_bytes: Arc::clone(&downloaded_bytes),
+                bytes_received,
+                bytes_committed,
                 speed_bps,
                 active_connections,
                 context: task_context,
@@ -893,16 +940,29 @@ impl TaskController {
     }
 
     pub async fn pause_task(self: &Arc<Self>, task_id: i64) -> Result<(), DaemonError> {
-        let session = {
+        let task_lock = self.acquire_task_lock(task_id).await;
+        let _guard = task_lock.lock().await;
+
+        let (cancel_tx, join_handle) = {
             let mut sessions = self.active_sessions.write().await;
-            sessions.remove(&task_id)
+            if let Some(session) = sessions.get_mut(&task_id) {
+                (Some(session.cancel_tx.clone()), session.join_handle.take())
+            } else {
+                (None, None)
+            }
         };
 
-        if let Some(session) = session {
-            let _ = session.cancel_tx.send(true);
-            if let Some(handle) = session.join_handle {
-                let _ = tokio::time::timeout(std::time::Duration::from_millis(200), handle).await;
-            }
+        if let Some(session_tx) = cancel_tx {
+            let _ = session_tx.send(true);
+        }
+
+        if let Some(handle) = join_handle {
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(500), handle).await;
+        }
+
+        {
+            let mut sessions = self.active_sessions.write().await;
+            sessions.remove(&task_id);
         }
 
         // Rewind segment cursors in DB to 64 KiB boundary and persist Paused
@@ -933,8 +993,12 @@ impl TaskController {
     }
 
     pub async fn resume_task(self: &Arc<Self>, task_id: i64) -> Result<(), DaemonError> {
+        let task_lock = self.acquire_task_lock(task_id).await;
+        let _guard = task_lock.lock().await;
+
         let active_count = self.active_sessions.read().await.len();
         if active_count < self.max_concurrent_tasks {
+            drop(_guard);
             self.start_task(task_id).await?;
         } else {
             let db = self
@@ -951,17 +1015,30 @@ impl TaskController {
         task_id: i64,
         delete_file: bool,
     ) -> Result<(), DaemonError> {
-        let session = {
+        let task_lock = self.acquire_task_lock(task_id).await;
+        let _guard = task_lock.lock().await;
+
+        let (cancel_tx, join_handle) = {
             let mut sessions = self.active_sessions.write().await;
-            sessions.remove(&task_id)
+            if let Some(session) = sessions.get_mut(&task_id) {
+                (Some(session.cancel_tx.clone()), session.join_handle.take())
+            } else {
+                (None, None)
+            }
         };
         self.task_contexts.write().await.remove(&task_id);
 
-        if let Some(session) = session {
-            let _ = session.cancel_tx.send(true);
-            if let Some(handle) = session.join_handle {
-                let _ = tokio::time::timeout(std::time::Duration::from_millis(200), handle).await;
-            }
+        if let Some(session_tx) = cancel_tx {
+            let _ = session_tx.send(true);
+        }
+
+        if let Some(handle) = join_handle {
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(500), handle).await;
+        }
+
+        {
+            let mut sessions = self.active_sessions.write().await;
+            sessions.remove(&task_id);
         }
 
         let (dest_path, prev_status, protocol) = {
@@ -1034,9 +1111,15 @@ impl TaskController {
                 .map(|t| t.total_bytes)
                 .unwrap_or(0);
 
+            let clamped_downloaded = if total_bytes > 0 {
+                downloaded.min(total_bytes)
+            } else {
+                downloaded
+            };
+
             tasks.push(TaskProgress {
                 task_id: session.task_id,
-                downloaded_bytes: downloaded,
+                downloaded_bytes: clamped_downloaded,
                 total_bytes,
                 speed_bps: speed,
                 active_connections: conns,

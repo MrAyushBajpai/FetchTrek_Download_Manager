@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use fetchtrek_storage::{AsyncStorage, SlabPool, SLAB_SIZE};
-use fetchtrek_types::state::InvalidTransitionError;
 use fetchtrek_types::{
     ByteRange, FetchTrekError, NetworkError, StorageError, TaskEvent, TaskState,
 };
@@ -64,13 +63,60 @@ pub struct DownloadSummary {
     pub finalization_duration: std::time::Duration,
 }
 
+/// An isolated, session-scoped execution context for a single download instance.
+/// Holds per-download state and atomic metrics, preventing cross-task state
+/// or counter corruption during concurrent downloads (FT-QA-004).
+pub struct DownloadSession {
+    state: RwLock<TaskState>,
+    bytes_ingested: Arc<AtomicU64>,
+    active_connections: Arc<AtomicUsize>,
+}
+
+impl Default for DownloadSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DownloadSession {
+    pub fn new() -> Self {
+        Self {
+            state: RwLock::new(TaskState::Queued),
+            bytes_ingested: Arc::new(AtomicU64::new(0)),
+            active_connections: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    pub fn state(&self) -> TaskState {
+        *self.state.read().unwrap()
+    }
+
+    pub fn set_state(&self, new_state: TaskState) {
+        *self.state.write().unwrap() = new_state;
+    }
+
+    pub fn apply_event(&self, event: TaskEvent) -> Result<TaskState, FetchTrekError> {
+        let mut guard = self.state.write().unwrap();
+        let next = fetchtrek_types::transition(*guard, event)
+            .map_err(FetchTrekError::InvalidStateTransition)?;
+        *guard = next;
+        Ok(next)
+    }
+
+    pub fn bytes_ingested(&self) -> u64 {
+        self.bytes_ingested.load(Ordering::Acquire)
+    }
+
+    pub fn active_connections(&self) -> usize {
+        self.active_connections.load(Ordering::Acquire)
+    }
+}
+
 pub struct DownloadCoordinator {
     transport: Arc<dyn NetworkTransport>,
     storage: Arc<dyn AsyncStorage>,
     slab_pool: Arc<SlabPool>,
-    state: RwLock<TaskState>,
-    bytes_ingested: Arc<AtomicU64>,
-    active_connections: Arc<AtomicUsize>,
+    last_session: RwLock<Option<Arc<DownloadSession>>>,
 }
 
 pub type IngestionEngine = DownloadCoordinator;
@@ -85,47 +131,60 @@ impl DownloadCoordinator {
             transport,
             storage,
             slab_pool,
-            state: RwLock::new(TaskState::Queued),
-            bytes_ingested: Arc::new(AtomicU64::new(0)),
-            active_connections: Arc::new(AtomicUsize::new(0)),
+            last_session: RwLock::new(None),
         }
     }
 
     pub fn state(&self) -> TaskState {
-        *self.state.read().unwrap()
-    }
-
-    fn set_state(&self, new_state: TaskState) {
-        *self.state.write().unwrap() = new_state;
-    }
-
-    fn apply_event(&self, event: TaskEvent) -> Result<TaskState, InvalidTransitionError> {
-        let mut guard = self.state.write().unwrap();
-        let next = fetchtrek_types::transition(*guard, event)?;
-        *guard = next;
-        Ok(next)
+        self.last_session
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.state())
+            .unwrap_or(TaskState::Queued)
     }
 
     pub fn bytes_ingested(&self) -> u64 {
-        self.bytes_ingested.load(Ordering::Acquire)
+        self.last_session
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.bytes_ingested())
+            .unwrap_or(0)
     }
 
     pub fn active_connections(&self) -> usize {
-        self.active_connections.load(Ordering::Acquire)
+        self.last_session
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.active_connections())
+            .unwrap_or(0)
     }
 
     pub async fn download(
         &self,
         config: DownloadConfig,
     ) -> Result<DownloadSummary, FetchTrekError> {
-        self.bytes_ingested.store(0, Ordering::Release);
+        let session = Arc::new(DownloadSession::new());
+        {
+            let mut guard = self.last_session.write().unwrap();
+            *guard = Some(Arc::clone(&session));
+        }
+        self.download_with_session(config, session).await
+    }
 
+    pub async fn download_with_session(
+        &self,
+        config: DownloadConfig,
+        session: Arc<DownloadSession>,
+    ) -> Result<DownloadSummary, FetchTrekError> {
         // Phase 1: Probe & Plan
-        let _ = self.apply_event(TaskEvent::StartGranted);
+        session.apply_event(TaskEvent::StartGranted)?;
         let probe_res = match self.transport.probe(&config.url, &config.context).await {
             Ok(res) => res,
             Err(e) => {
-                self.set_state(TaskState::FatalError);
+                session.set_state(TaskState::FatalError);
                 return Err(FetchTrekError::Network(e));
             }
         };
@@ -133,17 +192,17 @@ impl DownloadCoordinator {
         let total_bytes = match probe_res.total_bytes {
             Some(b) => b,
             None => {
-                self.set_state(TaskState::FatalError);
+                session.set_state(TaskState::FatalError);
                 return Err(FetchTrekError::Network(NetworkError::NoRangeSupport));
             }
         };
 
         if !probe_res.supports_ranges && config.connections > 1 {
-            self.set_state(TaskState::FatalError);
+            session.set_state(TaskState::FatalError);
             return Err(FetchTrekError::Network(NetworkError::NoRangeSupport));
         }
 
-        let _ = self.apply_event(TaskEvent::ProbeSucceeded);
+        session.apply_event(TaskEvent::ProbeSucceeded)?;
 
         // Handle empty file case
         if total_bytes == 0 {
@@ -151,16 +210,16 @@ impl DownloadCoordinator {
                 let _ = std::fs::create_dir_all(parent);
             }
             if let Err(e) = self.storage.allocate_sparse(&config.destination, 0).await {
-                self.set_state(TaskState::FatalError);
+                session.set_state(TaskState::FatalError);
                 return Err(FetchTrekError::Storage(e));
             }
-            let _ = self.apply_event(TaskEvent::SparseCreated);
-            let _ = self.apply_event(TaskEvent::LastByteFlushed);
+            session.apply_event(TaskEvent::SparseCreated)?;
+            session.apply_event(TaskEvent::LastByteFlushed)?;
             if let Err(e) = self.storage.finalize_file(&config.destination, 0).await {
-                self.set_state(TaskState::FatalError);
+                session.set_state(TaskState::FatalError);
                 return Err(FetchTrekError::Storage(e));
             }
-            let _ = self.apply_event(TaskEvent::DirectFinalize);
+            session.apply_event(TaskEvent::DirectFinalize)?;
             return Ok(DownloadSummary {
                 destination: config.destination,
                 total_bytes: 0,
@@ -179,12 +238,12 @@ impl DownloadCoordinator {
             .allocate_sparse(&config.destination, total_bytes)
             .await
         {
-            self.set_state(TaskState::FatalError);
+            session.set_state(TaskState::FatalError);
             let _ = std::fs::remove_file(&config.destination);
             return Err(FetchTrekError::Storage(e));
         }
 
-        let _ = self.apply_event(TaskEvent::SparseCreated);
+        session.apply_event(TaskEvent::SparseCreated)?;
 
         // Partition segments
         let total_range = ByteRange::new(0, total_bytes - 1);
@@ -201,8 +260,8 @@ impl DownloadCoordinator {
             let storage = Arc::clone(&self.storage);
             let slab_pool = Arc::clone(&self.slab_pool);
             let scheduler = Arc::clone(&scheduler);
-            let bytes_ingested = Arc::clone(&self.bytes_ingested);
-            let active_connections = Arc::clone(&self.active_connections);
+            let bytes_ingested = Arc::clone(&session.bytes_ingested);
+            let active_connections = Arc::clone(&session.active_connections);
             let rate_limiter = config.rate_limiter.clone();
 
             let url = config.url.clone();
@@ -327,12 +386,12 @@ impl DownloadCoordinator {
             match handle.await {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
-                    self.set_state(TaskState::FatalError);
+                    session.set_state(TaskState::FatalError);
                     let _ = std::fs::remove_file(&config.destination);
                     return Err(e);
                 }
                 Err(_) => {
-                    self.set_state(TaskState::FatalError);
+                    session.set_state(TaskState::FatalError);
                     let _ = std::fs::remove_file(&config.destination);
                     return Err(FetchTrekError::Storage(StorageError::IoFailure));
                 }
@@ -341,25 +400,25 @@ impl DownloadCoordinator {
 
         // Phase 4: Instant Finalization
         let finalize_start = std::time::Instant::now();
-        let _ = self.apply_event(TaskEvent::LastByteFlushed);
+        session.apply_event(TaskEvent::LastByteFlushed)?;
 
         if let Err(e) = self
             .storage
             .finalize_file(&config.destination, total_bytes)
             .await
         {
-            self.set_state(TaskState::FatalError);
+            session.set_state(TaskState::FatalError);
             let _ = std::fs::remove_file(&config.destination);
             return Err(FetchTrekError::Storage(e));
         }
 
-        let _ = self.apply_event(TaskEvent::DirectFinalize);
+        session.apply_event(TaskEvent::DirectFinalize)?;
         let finalization_duration = finalize_start.elapsed();
 
         Ok(DownloadSummary {
             destination: config.destination,
             total_bytes,
-            final_state: TaskState::Completed,
+            final_state: session.state(),
             finalization_duration,
         })
     }

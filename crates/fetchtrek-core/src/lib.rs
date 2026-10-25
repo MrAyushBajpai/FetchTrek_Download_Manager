@@ -4,7 +4,9 @@ pub mod scheduler;
 pub mod throttle;
 pub mod transport;
 
-pub use coordinator::{DownloadConfig, DownloadCoordinator, DownloadSummary, IngestionEngine};
+pub use coordinator::{
+    DownloadConfig, DownloadCoordinator, DownloadSession, DownloadSummary, IngestionEngine,
+};
 pub use media::{
     ChunkState, MediaChunk, MediaChunkScheduler, MediaDownloadConfig, MediaDownloadSummary,
     MediaIngestionCoordinator, MediaSchedulerSnapshot,

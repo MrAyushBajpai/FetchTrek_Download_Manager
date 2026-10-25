@@ -118,7 +118,7 @@ impl fmt::Display for TaskEvent {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct InvalidTransitionError {
     pub current: TaskState,
     pub event: TaskEvent,

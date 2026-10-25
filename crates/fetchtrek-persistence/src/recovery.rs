@@ -15,6 +15,41 @@ pub fn rewind_cursor_to_cluster(current_cursor: u64, range_start: u64) -> u64 {
     std::cmp::max(range_start, aligned)
 }
 
+/// Detects the on-disk file size for a task by inspecting its staging file or final destination.
+pub fn find_task_file_size(task: &TaskRecord) -> Option<u64> {
+    let dest_path = std::path::Path::new(&task.destination_path);
+    let parent = dest_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+
+    // 1. Direct check for default staging file: .fetchtrek_temp_{task_id}.part
+    let default_staging = parent.join(format!(".fetchtrek_temp_{}.part", task.id));
+    if let Ok(meta) = std::fs::metadata(&default_staging) {
+        return Some(meta.len());
+    }
+
+    // 2. Scan parent directory for matching staging pattern .fetchtrek_temp_{task_id}*
+    let prefix = format!(".fetchtrek_temp_{}", task.id);
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string() {
+                if name.starts_with(&prefix) {
+                    if let Ok(meta) = entry.metadata() {
+                        return Some(meta.len());
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Fallback to final destination path if it exists
+    if let Ok(meta) = std::fs::metadata(dest_path) {
+        return Some(meta.len());
+    }
+
+    None
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveredTask {
     pub task: TaskRecord,
@@ -70,14 +105,20 @@ impl Database {
             self.connection()
                 .execute_batch("SAVEPOINT recover_task_sp;")?;
 
+            let on_disk_len = find_task_file_size(&task);
+
             let res = (|| -> Result<(Vec<TaskSegmentRecord>, u64), PersistenceError> {
                 let mut segments = self.get_segments(task.id)?;
                 let mut total_discarded = 0u64;
 
                 for seg in segments.iter_mut() {
                     if seg.status != 3 {
+                        let effective_cursor = match on_disk_len {
+                            Some(disk_len) if disk_len < seg.current_cursor => disk_len,
+                            _ => seg.current_cursor,
+                        };
                         let new_cursor =
-                            rewind_cursor_to_cluster(seg.current_cursor, seg.range_start);
+                            rewind_cursor_to_cluster(effective_cursor, seg.range_start);
                         let discarded = seg.current_cursor.saturating_sub(new_cursor);
                         total_discarded += discarded;
 

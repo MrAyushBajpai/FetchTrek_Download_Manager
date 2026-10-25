@@ -175,6 +175,7 @@ pub enum FetchTrekError {
     Storage(StorageError),
     Ipc(IpcError),
     Media(MediaError),
+    InvalidStateTransition(crate::state::InvalidTransitionError),
 }
 
 impl FetchTrekError {
@@ -184,6 +185,7 @@ impl FetchTrekError {
             Self::Storage(err) => err.classification(),
             Self::Ipc(err) => err.classification(),
             Self::Media(err) => err.classification(),
+            Self::InvalidStateTransition(_) => ErrorClassification::TerminalFault,
         }
     }
 
@@ -202,6 +204,7 @@ impl fmt::Display for FetchTrekError {
             Self::Storage(err) => write!(f, "{}", err),
             Self::Ipc(err) => write!(f, "{}", err),
             Self::Media(err) => write!(f, "{}", err),
+            Self::InvalidStateTransition(err) => write!(f, "invalid state transition: {}", err),
         }
     }
 }
@@ -213,6 +216,7 @@ impl core::error::Error for FetchTrekError {
             Self::Storage(err) => Some(err),
             Self::Ipc(err) => Some(err),
             Self::Media(err) => Some(err),
+            Self::InvalidStateTransition(err) => Some(err),
         }
     }
 }

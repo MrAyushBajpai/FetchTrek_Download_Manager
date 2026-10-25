@@ -508,7 +508,7 @@ async fn dispatch_ipc_frame(engine: &DaemonEngine, frame: &IpcFrame) -> IpcFrame
 
 fn task_record_to_summary(t: TaskRecord) -> TaskSummary {
     let progress_percent = if t.total_bytes > 0 {
-        ((t.downloaded_bytes as f64 / t.total_bytes as f64) * 100.0) as f32
+        ((t.downloaded_bytes as f64 / t.total_bytes as f64) * 100.0).clamp(0.0, 100.0) as f32
     } else {
         0.0
     };

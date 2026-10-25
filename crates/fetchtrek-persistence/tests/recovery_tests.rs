@@ -211,3 +211,59 @@ fn test_recovery_latency_and_quick_check_gate() {
         }
     }
 }
+
+#[test]
+fn test_recovery_disk_file_clamping() {
+    let temp = TempDbGuard::new("recovery_disk_clamp");
+    let db = Database::open(&temp.path).expect("open db failed");
+
+    let dest_dir = std::env::temp_dir();
+    let dest_file = dest_dir.join(format!(
+        "fetchtrek_disk_clamp_{}.bin",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+
+    let mut new_task = NewTask::new(
+        "uuid-disk-clamp-001",
+        "https://cdn.example.com/truncated.bin",
+        dest_file.to_str().unwrap(),
+        "truncated.bin",
+        "https",
+        1_000_000,
+    );
+    new_task.status = TaskState::Active;
+    new_task.downloaded_bytes = 200_000;
+
+    let task_id = db.create_task(&new_task).expect("create_task failed");
+
+    // Segment cursor recorded in DB as 200_000
+    let seg0 = TaskSegmentRecord::new(task_id, 0, 0, 999_999, 200_000, 1);
+    db.save_segments(task_id, &[seg0])
+        .expect("save_segments failed");
+
+    // Create staging file on disk with truncated size: 150_000 bytes
+    let staging_path = dest_dir.join(format!(".fetchtrek_temp_{task_id}.part"));
+    std::fs::write(&staging_path, vec![0u8; 150_000]).expect("write staging file");
+
+    let recovered = db
+        .recover_interrupted_tasks()
+        .expect("recover_interrupted_tasks failed");
+
+    let _ = std::fs::remove_file(&staging_path);
+
+    assert_eq!(recovered.len(), 1);
+    let rec = &recovered[0];
+    assert_eq!(rec.task.status, TaskState::Paused);
+
+    // Bounded to 150_000, then rewound to 64 KiB boundary: 2 * 65536 = 131_072
+    let expected_rewound = rewind_cursor_to_cluster(150_000, 0);
+    assert_eq!(expected_rewound, 131_072);
+    assert_eq!(rec.segments[0].current_cursor, expected_rewound);
+
+    // Discarded bytes: 200_000 - 131_072 = 68_928
+    assert_eq!(rec.discarded_tail_bytes, 200_000 - 131_072);
+    assert_eq!(rec.task.downloaded_bytes, 131_072);
+}
