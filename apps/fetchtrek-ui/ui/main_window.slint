@@ -25,6 +25,7 @@ export component MainWindow inherits Window {
     in property <int> selected_count: 0;
     in property <string> aggregate_download_speed: "0.0 MB/s";
     in property <string> aggregate_upload_speed: "0.0 MB/s";
+    in property <string> daemon_status: "Connecting...";
 
     callback add_download_clicked();
     callback resume_all_clicked();
@@ -67,6 +68,7 @@ export component MainWindow inherits Window {
                 count_failed: root.count_failed;
                 download_speed: root.aggregate_download_speed;
                 upload_speed: root.aggregate_upload_speed;
+                daemon_status: root.daemon_status;
                 filter_category_selected(cat) => { root.filter_category_selected(cat); }
             }
 

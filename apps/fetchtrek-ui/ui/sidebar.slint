@@ -85,6 +85,11 @@ export component Sidebar inherits Rectangle {
     in property <int> count_failed: 0;
     in property <string> download_speed: "0.0 MB/s";
     in property <string> upload_speed: "0.0 MB/s";
+    in property <string> daemon_status: "Connecting...";
+
+    property <color> daemon_status_color: root.daemon_status == "Connected" ? DesignTokens.status-green :
+                                          root.daemon_status == "Connecting..." ? DesignTokens.status-amber :
+                                          DesignTokens.status-red;
 
     callback filter_category_selected(string);
 
@@ -256,15 +261,15 @@ export component Sidebar inherits Rectangle {
                             width: 6px;
                             height: 6px;
                             border-radius: 3px;
-                            background: DesignTokens.status-green;
+                            background: root.daemon_status_color;
                         }
                     }
 
                     Text {
-                        text: "Daemon Connected";
+                        text: root.daemon_status;
                         font-size: 10px;
                         font-weight: 600;
-                        color: DesignTokens.status-green;
+                        color: root.daemon_status_color;
                         vertical-alignment: center;
                     }
                 }
