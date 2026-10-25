@@ -1,0 +1,59 @@
+import { DesignTokens } from "tokens.slint";
+import { SmoothProgressBar } from "progress_bar.slint";
+import { StatusPill, TaskDisplayStatus } from "status_pill.slint";
+
+export component MainWindow inherits Window {
+    title: "FetchTrek Download Manager";
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 960px;
+    min-height: 600px;
+    background: DesignTokens.surface-void;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 24px;
+        padding: 40px;
+
+        Text {
+            text: "FetchTrek Presentation Engine";
+            font-size: 20px;
+            font-weight: 700;
+            color: DesignTokens.text-primary;
+            horizontal-alignment: center;
+        }
+
+        Rectangle {
+            background: DesignTokens.surface-card;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: DesignTokens.border-hairline;
+            width: 500px;
+
+            VerticalLayout {
+                padding: 24px;
+                spacing: 16px;
+
+                Text {
+                    text: "Design System Primitives Preview";
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: DesignTokens.text-secondary;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    StatusPill { status: TaskDisplayStatus.Downloading; }
+                    StatusPill { status: TaskDisplayStatus.Queued; }
+                    StatusPill { status: TaskDisplayStatus.Paused; }
+                    StatusPill { status: TaskDisplayStatus.Completed; }
+                    StatusPill { status: TaskDisplayStatus.Failed; }
+                }
+
+                SmoothProgressBar { progress: 0.68; fill-color: DesignTokens.primary-blue; }
+                SmoothProgressBar { progress: 0.35; fill-color: DesignTokens.status-yellow; }
+                SmoothProgressBar { progress: 1.00; fill-color: DesignTokens.status-green; }
+            }
+        }
+    }
+}

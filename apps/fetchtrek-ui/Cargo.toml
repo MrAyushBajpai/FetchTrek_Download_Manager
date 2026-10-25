@@ -6,3 +6,7 @@ edition = "2021"
 [dependencies]
 fetchtrek-types = { path = "../../crates/fetchtrek-types" }
 fetchtrek-ipc = { path = "../../crates/fetchtrek-ipc" }
+slint = "1.8"
+
+[build-dependencies]
+slint-build = "1.8"

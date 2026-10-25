@@ -1,0 +1,50 @@
+import { DesignTokens } from "tokens.slint";
+
+export enum TaskDisplayStatus {
+    Downloading,
+    Queued,
+    Paused,
+    Completed,
+    Failed
+}
+
+export component StatusPill inherits Rectangle {
+    in property <TaskDisplayStatus> status: TaskDisplayStatus.Downloading;
+
+    border-radius: 4px;
+    border-width: 1px;
+
+    background: root.status == TaskDisplayStatus.Downloading ? DesignTokens.primary-blue.with-alpha(0.15) :
+                root.status == TaskDisplayStatus.Queued ? DesignTokens.status-amber.with-alpha(0.15) :
+                root.status == TaskDisplayStatus.Paused ? DesignTokens.status-yellow.with-alpha(0.15) :
+                root.status == TaskDisplayStatus.Completed ? DesignTokens.status-green.with-alpha(0.15) :
+                DesignTokens.status-red.with-alpha(0.15);
+
+    border-color: root.status == TaskDisplayStatus.Downloading ? DesignTokens.primary-blue.with-alpha(0.3) :
+                  root.status == TaskDisplayStatus.Queued ? DesignTokens.status-amber.with-alpha(0.3) :
+                  root.status == TaskDisplayStatus.Paused ? DesignTokens.status-yellow.with-alpha(0.3) :
+                  root.status == TaskDisplayStatus.Completed ? DesignTokens.status-green.with-alpha(0.3) :
+                  DesignTokens.status-red.with-alpha(0.3);
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+
+        Text {
+            text: root.status == TaskDisplayStatus.Downloading ? "DOWNLOADING" :
+                  root.status == TaskDisplayStatus.Queued ? "QUEUED" :
+                  root.status == TaskDisplayStatus.Paused ? "PAUSED" :
+                  root.status == TaskDisplayStatus.Completed ? "COMPLETED" : "FAILED";
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            color: root.status == TaskDisplayStatus.Downloading ? DesignTokens.primary-blue :
+                   root.status == TaskDisplayStatus.Queued ? DesignTokens.status-amber :
+                   root.status == TaskDisplayStatus.Paused ? DesignTokens.status-yellow :
+                   root.status == TaskDisplayStatus.Completed ? DesignTokens.status-green :
+                   DesignTokens.status-red;
+        }
+    }
+}

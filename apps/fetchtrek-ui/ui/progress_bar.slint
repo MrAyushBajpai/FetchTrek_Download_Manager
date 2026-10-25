@@ -1,0 +1,25 @@
+import { DesignTokens } from "tokens.slint";
+
+export component SmoothProgressBar inherits Rectangle {
+    in property <float> progress: 0.0;
+    in property <color> fill-color: DesignTokens.primary-blue;
+
+    height: 8px;
+    background: DesignTokens.surface-inset;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: DesignTokens.border-hairline;
+    clip: true;
+
+    Rectangle {
+        width: parent.width * Math.min(1.0, Math.max(0.0, root.progress));
+        height: parent.height;
+        background: root.fill-color;
+        border-radius: 4px;
+
+        animate width {
+            duration: 250ms;
+            easing: ease-out;
+        }
+    }
+}
