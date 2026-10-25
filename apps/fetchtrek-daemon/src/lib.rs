@@ -4,7 +4,10 @@ pub mod error;
 pub mod media_controller;
 pub mod torrent_controller;
 
-pub use controller::{ActiveTaskSession, TaskController};
+pub use controller::{
+    is_windows_reserved_device_name, task_staging_path, validate_destination_path,
+    validate_download_url, validate_filename, ActiveTaskSession, TaskController,
+};
 pub use engine::{DaemonConfig, DaemonEngine};
 pub use error::DaemonError;
 pub use media_controller::start_media_stream_download;

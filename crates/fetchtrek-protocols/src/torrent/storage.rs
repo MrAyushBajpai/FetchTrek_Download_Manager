@@ -39,10 +39,76 @@ impl TorrentDiskStorage {
         &self.base_dir
     }
 
+    /// Verifies that target path does not escape the canonical base directory via traversal or drive escapes.
+    pub fn ensure_contained(
+        base: &std::path::Path,
+        target: &std::path::Path,
+    ) -> Result<PathBuf, TorrentError> {
+        let full = if target.starts_with(base) || target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            base.join(target)
+        };
+
+        // Normalize base components lexically
+        let mut normalized_base = PathBuf::new();
+        for comp in base.components() {
+            match comp {
+                std::path::Component::Prefix(p) => normalized_base.push(p.as_os_str()),
+                std::path::Component::RootDir => {
+                    normalized_base.push(std::path::Component::RootDir)
+                }
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    normalized_base.pop();
+                }
+                std::path::Component::Normal(c) => normalized_base.push(c),
+            }
+        }
+
+        // Normalize target components lexically
+        let mut normalized_target = PathBuf::new();
+        for comp in full.components() {
+            match comp {
+                std::path::Component::Prefix(p) => normalized_target.push(p.as_os_str()),
+                std::path::Component::RootDir => {
+                    normalized_target.push(std::path::Component::RootDir)
+                }
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    if !normalized_target.pop() {
+                        return Err(TorrentError::InvalidMetainfo(format!(
+                            "Path escapes base directory: {:?}",
+                            target
+                        )));
+                    }
+                }
+                std::path::Component::Normal(c) => normalized_target.push(c),
+            }
+        }
+
+        if !normalized_target.starts_with(&normalized_base) {
+            return Err(TorrentError::InvalidMetainfo(format!(
+                "Path {:?} escapes base directory {:?}",
+                target, base
+            )));
+        }
+
+        Ok(normalized_target)
+    }
+
     /// Pre-allocates files on disk using sparse/direct allocation and creates directory scaffolding.
     pub async fn initialize_files(&self) -> Result<(), TorrentError> {
+        // Pre-validate ALL files before any mutation
         for file in &self.meta.files {
             let full_path = self.base_dir.join(&file.path);
+            Self::ensure_contained(&self.base_dir, &full_path)?;
+        }
+
+        // Allocate only after all files are proven contained
+        for file in &self.meta.files {
+            let full_path =
+                Self::ensure_contained(&self.base_dir, &self.base_dir.join(&file.path))?;
             if let Some(parent) = full_path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
@@ -64,6 +130,11 @@ impl TorrentDiskStorage {
         torrent_offset: u64,
         length: usize,
     ) -> Result<Vec<FileSpan>, TorrentError> {
+        // Pre-validate ALL files are contained
+        for file in &self.meta.files {
+            Self::ensure_contained(&self.base_dir, &self.base_dir.join(&file.path))?;
+        }
+
         let req_start = torrent_offset;
         let req_end = torrent_offset
             .checked_add(length as u64)
@@ -99,7 +170,8 @@ impl TorrentDiskStorage {
             let overlap_end = req_end.min(cum_end);
             let span_len = (overlap_end - overlap_start) as usize;
             let file_offset = overlap_start - cum_start;
-            let full_path = self.base_dir.join(&file.path);
+            let full_path =
+                Self::ensure_contained(&self.base_dir, &self.base_dir.join(&file.path))?;
 
             spans.push(FileSpan {
                 file_index: idx,

@@ -21,8 +21,9 @@ pub mod torrent;
 #[cfg(feature = "torrent")]
 pub use torrent::{
     announce_http, announce_udp, decode_base32, deduplicate_peers, extract_raw_dict_value, sha1,
-    to_base32, AnnounceEvent, AnnounceRequest, AnnounceResponse, BencodeValue, BlockRequest,
-    FileSpan, MagnetLink, PeerConnection, PeerEndpoint, PeerHandshake, PeerMessage, PeerState,
-    PickerStrategy, PieceBuffer, PiecePicker, Sha1, TorrentDiskStorage, TorrentError, TorrentFile,
-    TorrentMeta, TrackerCoordinator, HANDSHAKE_LEN, MAX_MESSAGE_LENGTH, STANDARD_BLOCK_SIZE,
+    to_base32, validate_torrent_path_component, AnnounceEvent, AnnounceRequest, AnnounceResponse,
+    BencodeValue, BlockRequest, FileSpan, MagnetLink, PeerConnection, PeerEndpoint, PeerHandshake,
+    PeerMessage, PeerState, PickerStrategy, PieceBuffer, PiecePicker, Sha1, TorrentDiskStorage,
+    TorrentError, TorrentFile, TorrentMeta, TrackerCoordinator, HANDSHAKE_LEN, MAX_MESSAGE_LENGTH,
+    STANDARD_BLOCK_SIZE,
 };

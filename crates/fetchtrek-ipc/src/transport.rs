@@ -17,7 +17,7 @@ pub fn default_endpoint() -> String {
         format!("{}/fetchtrek/ipc.sock", runtime_dir)
     } else {
         let uid = unsafe { libc::getuid() };
-        format!("/tmp/fetchtrek_{}.sock", uid)
+        format!("/tmp/fetchtrek-{}/ipc.sock", uid)
     }
 }
 
@@ -31,7 +31,8 @@ pub fn endpoint_with_name(name: &str) -> String {
         if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
             format!("{}/{}.sock", runtime_dir, name)
         } else {
-            format!("/tmp/{}.sock", name)
+            let uid = unsafe { libc::getuid() };
+            format!("/tmp/fetchtrek-{}/{}.sock", uid, name)
         }
     }
 }
@@ -182,11 +183,47 @@ pub struct IpcServer {
 #[cfg(unix)]
 impl IpcServer {
     pub fn bind(endpoint: &str) -> Result<Self, IpcError> {
-        let _ = std::fs::remove_file(endpoint);
-        if let Some(parent) = std::path::Path::new(endpoint).parent() {
-            let _ = std::fs::create_dir_all(parent);
+        use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+
+        let path = std::path::Path::new(endpoint);
+
+        // Stale Socket Recovery with symlink and ownership verification
+        if let Ok(meta) = std::fs::symlink_metadata(path) {
+            if meta.file_type().is_symlink() {
+                return Err(IpcError::Io(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "IPC endpoint cannot be a symlink",
+                )));
+            }
+            if !meta.file_type().is_socket() {
+                return Err(IpcError::Io(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "IPC endpoint exists and is not a socket",
+                )));
+            }
+            let current_uid = unsafe { libc::getuid() };
+            if meta.uid() != current_uid {
+                return Err(IpcError::Io(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "IPC endpoint owned by different user",
+                )));
+            }
+            std::fs::remove_file(path)?;
         }
+
+        // Create parent directory with 0700 permissions if needed
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                std::fs::DirBuilder::new()
+                    .mode(0o700)
+                    .recursive(true)
+                    .create(parent)?;
+            }
+        }
+
         let listener = tokio::net::UnixListener::bind(endpoint)?;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+
         Ok(Self {
             endpoint: endpoint.to_string(),
             listener,

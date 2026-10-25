@@ -11,6 +11,36 @@ pub struct TorrentFile {
     pub path: PathBuf,
 }
 
+/// Validates that a path component (root name or sub-path element) is a safe relative name.
+pub fn validate_torrent_path_component(comp: &str) -> Result<(), TorrentError> {
+    if comp.is_empty() {
+        return Err(TorrentError::InvalidMetainfo(
+            "Torrent path component cannot be empty".into(),
+        ));
+    }
+    if comp == "." || comp == ".." || comp.contains("..") {
+        return Err(TorrentError::InvalidMetainfo(format!(
+            "Torrent path component cannot contain traversal sequences: '{comp}'"
+        )));
+    }
+    if comp.contains('/') || comp.contains('\\') {
+        return Err(TorrentError::InvalidMetainfo(format!(
+            "Torrent path component cannot contain directory separators: '{comp}'"
+        )));
+    }
+    if comp.contains(':') {
+        return Err(TorrentError::InvalidMetainfo(format!(
+            "Torrent path component cannot contain Windows drive designators: '{comp}'"
+        )));
+    }
+    if comp.chars().any(|c| c.is_control() || c == '\0') {
+        return Err(TorrentError::InvalidMetainfo(format!(
+            "Torrent path component cannot contain control characters: '{comp}'"
+        )));
+    }
+    Ok(())
+}
+
 /// Structured BEP 0003 Metainfo model parsed from a `.torrent` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TorrentMeta {
@@ -56,11 +86,7 @@ impl TorrentMeta {
         let name = String::from_utf8(name_bytes.to_vec()).map_err(|_| {
             TorrentError::InvalidMetainfo("'name' field contains invalid UTF-8".into())
         })?;
-        if name.is_empty() {
-            return Err(TorrentError::InvalidMetainfo(
-                "'name' field cannot be empty".into(),
-            ));
-        }
+        validate_torrent_path_component(&name)?;
 
         // 4. Piece length
         let piece_length_int = info
@@ -174,11 +200,7 @@ impl TorrentMeta {
                             "File #{idx} path component invalid UTF-8"
                         ))
                     })?;
-                    if part_str.is_empty() || part_str == "." || part_str == ".." {
-                        return Err(TorrentError::InvalidMetainfo(format!(
-                            "File #{idx} invalid path component: '{part_str}'"
-                        )));
-                    }
+                    validate_torrent_path_component(part_str)?;
                     full_path.push(part_str);
                 }
 

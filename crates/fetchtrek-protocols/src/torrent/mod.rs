@@ -11,7 +11,7 @@ pub mod tracker;
 pub use bencode::{extract_raw_dict_value, BencodeValue};
 pub use error::TorrentError;
 pub use magnet::{decode_base32, to_base32, MagnetLink};
-pub use metainfo::{TorrentFile, TorrentMeta};
+pub use metainfo::{validate_torrent_path_component, TorrentFile, TorrentMeta};
 pub use peer::{
     PeerConnection, PeerHandshake, PeerMessage, PeerState, HANDSHAKE_LEN, MAX_MESSAGE_LENGTH,
     STANDARD_BLOCK_SIZE,

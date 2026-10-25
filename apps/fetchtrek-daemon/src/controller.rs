@@ -83,6 +83,124 @@ pub fn sanitize_media_filename(filename: &str) -> String {
     }
 }
 
+/// Returns true if name stem matches Windows reserved device names (case-insensitive).
+pub fn is_windows_reserved_device_name(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or(name);
+    matches!(
+        base.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
+/// Validates download URL scheme against allowed protocols (http, https, magnet, or local .torrent).
+pub fn validate_download_url(url: &str) -> Result<(), DaemonError> {
+    if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("magnet:?") {
+        return Ok(());
+    }
+    let path = std::path::Path::new(url);
+    if path.is_absolute()
+        && path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("torrent"))
+            .unwrap_or(false)
+        && path.exists()
+    {
+        return Ok(());
+    }
+    Err(DaemonError::Internal(format!(
+        "Invalid or rejected URL scheme/path: '{url}'. Allowed: http://, https://, magnet:?, or local absolute .torrent file."
+    )))
+}
+
+/// Validates that filename is safe, non-empty, contains no path traversal, control chars, or reserved names.
+pub fn validate_filename(filename: &str) -> Result<(), DaemonError> {
+    if filename.is_empty() {
+        return Err(DaemonError::Internal("Filename cannot be empty".into()));
+    }
+    if filename.contains('/') || filename.contains('\\') {
+        return Err(DaemonError::Internal(format!(
+            "Filename cannot contain directory separators: '{filename}'"
+        )));
+    }
+    if filename == "." || filename == ".." || filename.contains("..") {
+        return Err(DaemonError::Internal(format!(
+            "Filename cannot contain traversal sequences: '{filename}'"
+        )));
+    }
+    if filename.chars().any(|c| c.is_control() || c == '\0') {
+        return Err(DaemonError::Internal(format!(
+            "Filename cannot contain control characters: '{filename}'"
+        )));
+    }
+    if is_windows_reserved_device_name(filename) {
+        return Err(DaemonError::Internal(format!(
+            "Filename cannot be a Windows reserved device name: '{filename}'"
+        )));
+    }
+    Ok(())
+}
+
+/// Validates destination path against path traversal, control characters, and reserved names.
+pub fn validate_destination_path(dest: &std::path::Path) -> Result<(), DaemonError> {
+    for comp in dest.components() {
+        match comp {
+            std::path::Component::Normal(os_str) => {
+                let s = os_str.to_string_lossy();
+                if s == ".." || s.contains("..") {
+                    return Err(DaemonError::Internal(format!(
+                        "Destination path component contains traversal sequence: '{s}'"
+                    )));
+                }
+                if s.chars().any(|c| c.is_control() || c == '\0') {
+                    return Err(DaemonError::Internal(format!(
+                        "Destination path component contains control characters: '{s}'"
+                    )));
+                }
+                if is_windows_reserved_device_name(&s) {
+                    return Err(DaemonError::Internal(format!(
+                        "Destination path component is a Windows reserved device name: '{s}'"
+                    )));
+                }
+            }
+            std::path::Component::ParentDir => {
+                return Err(DaemonError::Internal(
+                    "Destination path cannot contain parent directory traversal ('..')".into(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Derives task-specific staging file path `.fetchtrek_temp_<task_id>.part` in destination directory.
+pub fn task_staging_path(dest: &std::path::Path, task_id: i64) -> PathBuf {
+    let parent = dest.parent().unwrap_or_else(|| std::path::Path::new("."));
+    parent.join(format!(".fetchtrek_temp_{task_id}.part"))
+}
+
 pub struct TaskController {
     pub database: Arc<std::sync::Mutex<Database>>,
     pub storage: Arc<PositionalStorage>,
@@ -126,6 +244,17 @@ impl TaskController {
         connections: Option<usize>,
         session_context: Option<SessionContext>,
     ) -> Result<TaskRecord, DaemonError> {
+        // 1. Centralized Input Validation Layer (FT-QA-012)
+        validate_download_url(url)?;
+        let num_connections = connections.unwrap_or(4).clamp(1, 32);
+
+        if let Some(dest_str) = destination_path {
+            validate_destination_path(std::path::Path::new(dest_str))?;
+        }
+        if let Some(fn_str) = filename {
+            validate_filename(fn_str)?;
+        }
+
         let context = session_context.unwrap_or_default();
         let initial_proto = detect_stream_protocol(url, None);
         let (probe_res, detected_protocol) = if initial_proto == Some("bittorrent") {
@@ -178,10 +307,12 @@ impl TaskController {
         } else {
             raw_filename
         };
+        validate_filename(&resolved_filename)?;
 
         let resolved_dest = destination_path
             .map(PathBuf::from)
             .unwrap_or_else(|| self.default_download_dir.join(&resolved_filename));
+        validate_destination_path(&resolved_dest)?;
 
         let uuid = format!(
             "task-{}",
@@ -216,8 +347,7 @@ impl TaskController {
             .await
             .insert(task_id, Arc::new(context));
 
-        // Pre-create initial segments
-        let num_connections = connections.unwrap_or(4).max(1);
+        // Pre-create initial segments with bounded connections
         if total_bytes > 0 {
             let total_range = ByteRange::new(0, total_bytes - 1);
             let scheduler = SegmentScheduler::new(total_range);
@@ -293,41 +423,7 @@ impl TaskController {
                 let _ = std::fs::create_dir_all(parent);
             }
 
-            // 2. Pre-allocate sparse file if total_bytes > 0
-            if task.total_bytes > 0 {
-                self_clone
-                    .storage
-                    .allocate_sparse(&dest_path, task.total_bytes)
-                    .await
-                    .map_err(DaemonError::Storage)?;
-            }
-
-            // 3. Load or create segment records
-            let mut segments = {
-                let db = self_clone
-                    .database
-                    .lock()
-                    .map_err(|e| DaemonError::Internal(e.to_string()))?;
-                db.get_segments(task_id)?
-            };
-
-            if segments.is_empty() && task.total_bytes > 0 {
-                let total_range = ByteRange::new(0, task.total_bytes - 1);
-                let scheduler = SegmentScheduler::new(total_range);
-                let initial_ranges = scheduler.split_initial(4);
-                for (idx, r) in initial_ranges.iter().enumerate() {
-                    segments.push(TaskSegmentRecord::new(
-                        task_id, idx as u32, r.start, r.end, r.start, 0,
-                    ));
-                }
-                let db = self_clone
-                    .database
-                    .lock()
-                    .map_err(|e| DaemonError::Internal(e.to_string()))?;
-                db.save_segments(task_id, &segments)?;
-            }
-
-            // 4. Session channels and metrics
+            // 2. Session channels and metrics
             let task_context = self_clone
                 .task_contexts
                 .read()
@@ -403,6 +499,41 @@ impl TaskController {
                 return Ok(());
             }
 
+            // 3. Staging file allocation for HTTP (FT-QA-007)
+            let staging_path = task_staging_path(&dest_path, task_id);
+            if task.total_bytes > 0 {
+                self_clone
+                    .storage
+                    .allocate_sparse(&staging_path, task.total_bytes)
+                    .await
+                    .map_err(DaemonError::Storage)?;
+            }
+
+            // 4. Load or create segment records
+            let mut segments = {
+                let db = self_clone
+                    .database
+                    .lock()
+                    .map_err(|e| DaemonError::Internal(e.to_string()))?;
+                db.get_segments(task_id)?
+            };
+
+            if segments.is_empty() && task.total_bytes > 0 {
+                let total_range = ByteRange::new(0, task.total_bytes - 1);
+                let scheduler = SegmentScheduler::new(total_range);
+                let initial_ranges = scheduler.split_initial(4);
+                for (idx, r) in initial_ranges.iter().enumerate() {
+                    segments.push(TaskSegmentRecord::new(
+                        task_id, idx as u32, r.start, r.end, r.start, 0,
+                    ));
+                }
+                let db = self_clone
+                    .database
+                    .lock()
+                    .map_err(|e| DaemonError::Internal(e.to_string()))?;
+                db.save_segments(task_id, &segments)?;
+            }
+
             let active_cursors: Vec<(u32, Arc<AtomicSegmentCursor>)> = segments
                 .iter()
                 .map(|seg| {
@@ -419,6 +550,7 @@ impl TaskController {
 
             // 5. Spawn background ingestion coordinator task
             let controller_clone = Arc::clone(&self_clone);
+            let staging_clone = staging_path.clone();
             let dest_clone = dest_path.clone();
             let total_bytes = task.total_bytes;
             let url_clone = task.url.clone();
@@ -448,7 +580,7 @@ impl TaskController {
                     let cursor_clone = Arc::clone(cursor);
                     let mut cancel_rx_worker = cancel_rx_task.clone();
                     let url = url_clone.clone();
-                    let dest = dest_clone.clone();
+                    let dest = staging_clone.clone();
                     let worker_context = Arc::clone(&context_for_session);
 
                     let worker_handle = tokio::spawn(async move {
@@ -623,6 +755,9 @@ impl TaskController {
                         if let Ok(db) = controller_clone.database.lock() {
                             let _ = db.update_task_status(task_id, TaskState::Failed);
                         }
+                        if staging_clone.exists() {
+                            let _ = tokio::fs::remove_file(&staging_clone).await;
+                        }
                         controller_clone
                             .active_sessions
                             .write()
@@ -661,13 +796,27 @@ impl TaskController {
                         let _ = db.update_task_status(task_id, TaskState::Paused);
                     }
                 } else {
-                    // Instant finalization with 0.00s post-download merge
+                    // Finalize staging file and atomically rename to destination path
                     if total_bytes > 0 {
                         controller_clone
                             .storage
-                            .finalize_file(&dest_clone, total_bytes)
+                            .finalize_file(&staging_clone, total_bytes)
                             .await
                             .map_err(DaemonError::Storage)?;
+                    }
+
+                    if staging_clone.exists() {
+                        if dest_clone.exists() {
+                            let _ = tokio::fs::remove_file(&dest_clone).await;
+                        }
+                        tokio::fs::rename(&staging_clone, &dest_clone)
+                            .await
+                            .map_err(|e| {
+                                DaemonError::Internal(format!(
+                                    "Failed to rename staging file: {}",
+                                    e
+                                ))
+                            })?;
                     }
 
                     let final_checkpoints: Vec<SegmentCheckpoint> = cursors_for_workers
@@ -728,7 +877,7 @@ impl TaskController {
         if let Some(session) = session {
             let _ = session.cancel_tx.send(true);
             if let Some(handle) = session.join_handle {
-                let _ = handle.await;
+                let _ = tokio::time::timeout(std::time::Duration::from_millis(200), handle).await;
             }
         }
 
@@ -787,25 +936,44 @@ impl TaskController {
         if let Some(session) = session {
             let _ = session.cancel_tx.send(true);
             if let Some(handle) = session.join_handle {
-                let _ = handle.await;
+                let _ = tokio::time::timeout(std::time::Duration::from_millis(200), handle).await;
             }
         }
 
-        let dest_path = {
+        let (dest_path, prev_status, protocol) = {
             let db = self
                 .database
                 .lock()
                 .map_err(|e| DaemonError::Internal(e.to_string()))?;
             let task = db.get_task_by_id(task_id)?;
+            let status = task.as_ref().map(|t| t.status);
+            let path = task.as_ref().map(|t| PathBuf::from(&t.destination_path));
+            let proto = task
+                .as_ref()
+                .map(|t| t.protocol.clone())
+                .unwrap_or_default();
             db.update_task_status(task_id, TaskState::Cancelled)?;
-            task.map(|t| PathBuf::from(t.destination_path))
+            (path, status, proto)
         };
 
-        if delete_file {
-            if let Some(path) = dest_path {
-                if path.exists() {
-                    let _ = std::fs::remove_file(path);
+        if let Some(ref path) = dest_path {
+            let staging_path = task_staging_path(path, task_id);
+            if staging_path.exists() {
+                let _ = std::fs::remove_file(&staging_path);
+            }
+            if protocol == "hls" || protocol == "dash" {
+                let staging_dir = PathBuf::from(format!(
+                    "{}.fetchtrek_parts_{}",
+                    path.to_string_lossy(),
+                    task_id
+                ));
+                if staging_dir.exists() {
+                    let _ = std::fs::remove_dir_all(&staging_dir);
                 }
+            }
+
+            if delete_file && prev_status == Some(TaskState::Completed) && path.exists() {
+                let _ = std::fs::remove_file(path);
             }
         }
 
