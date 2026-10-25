@@ -21,6 +21,10 @@ pub enum TorrentError {
     ProtocolError(String),
     #[error("Peer connection closed")]
     ConnectionClosed,
+    #[error("Storage error: {0}")]
+    Storage(String),
+    #[error("Piece verification failed for index {0}")]
+    PieceCorrupted(u32),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
