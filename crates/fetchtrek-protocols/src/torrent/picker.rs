@@ -334,6 +334,9 @@ impl PiecePicker {
                     if key < best_key {
                         best_key = key;
                         best_piece = Some(p);
+                        if rank == 0 && avail == 1 {
+                            break;
+                        }
                     }
                 }
 

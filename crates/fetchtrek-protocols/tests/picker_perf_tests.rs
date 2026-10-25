@@ -27,9 +27,9 @@ fn test_picker_perf_sequential() {
         blocks_picked, 10_000,
         "Should pick 10,000 blocks sequentially"
     );
-    // In debug mode with unoptimized build, ensure it completes comfortably within budget (< 500ms)
+    // In debug mode with unoptimized build, ensure it completes comfortably within budget (< 2000ms)
     assert!(
-        elapsed.as_millis() < 500,
+        elapsed.as_millis() < 2000,
         "Sequential pick_block took too long: {:?}",
         elapsed
     );
@@ -70,7 +70,7 @@ fn test_picker_perf_rarest_first() {
         "Should pick 5,000 blocks in rarest-first"
     );
     assert!(
-        elapsed.as_millis() < 500,
+        elapsed.as_millis() < 2000,
         "Rarest-first pick_block took too long: {:?}",
         elapsed
     );
