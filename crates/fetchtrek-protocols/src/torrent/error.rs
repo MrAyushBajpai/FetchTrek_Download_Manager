@@ -15,6 +15,12 @@ pub enum TorrentError {
     TrackerNetwork(String),
     #[error("Unsupported tracker protocol: {0}")]
     UnsupportedTracker(String),
+    #[error("Peer handshake error: {0}")]
+    HandshakeError(String),
+    #[error("Peer protocol error: {0}")]
+    ProtocolError(String),
+    #[error("Peer connection closed")]
+    ConnectionClosed,
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

@@ -22,5 +22,7 @@ pub mod torrent;
 pub use torrent::{
     announce_http, announce_udp, decode_base32, deduplicate_peers, extract_raw_dict_value, sha1,
     to_base32, AnnounceEvent, AnnounceRequest, AnnounceResponse, BencodeValue, MagnetLink,
-    PeerEndpoint, Sha1, TorrentError, TorrentFile, TorrentMeta, TrackerCoordinator,
+    PeerConnection, PeerEndpoint, PeerHandshake, PeerMessage, PeerState, Sha1, TorrentError,
+    TorrentFile, TorrentMeta, TrackerCoordinator, HANDSHAKE_LEN, MAX_MESSAGE_LENGTH,
+    STANDARD_BLOCK_SIZE,
 };
