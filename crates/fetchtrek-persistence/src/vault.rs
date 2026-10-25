@@ -1,5 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Mutex, RwLock};
+#[cfg(windows)]
+use std::sync::Mutex;
+use std::sync::RwLock;
 
 use crate::db::Database;
 use crate::error::PersistenceError;
