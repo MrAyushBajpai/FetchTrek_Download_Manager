@@ -150,6 +150,29 @@ impl NetworkTransport for HttpTransport {
         let reader = StreamReader::new(byte_stream);
         Ok(Box::pin(reader))
     }
+
+    async fn open_stream(
+        &self,
+        url: &str,
+        context: &SessionContext,
+    ) -> Result<Pin<Box<dyn ByteStream>>, NetworkError> {
+        let req = self.client.get(url);
+        let req = apply_context(req, context);
+
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => return Err(map_reqwest_error(e)),
+        };
+
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(map_status_error(status));
+        }
+
+        let byte_stream = resp.bytes_stream().map_err(std::io::Error::other);
+        let reader = StreamReader::new(byte_stream);
+        Ok(Box::pin(reader))
+    }
 }
 
 fn apply_context(mut req: RequestBuilder, context: &SessionContext) -> RequestBuilder {

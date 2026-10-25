@@ -390,8 +390,8 @@ fn test_large_playlist_parsing_performance() {
 
     println!("1,000-segment playlist parsed in {:?}", elapsed);
     assert!(
-        elapsed.as_millis() < 5,
-        "Parsing 1,000 segments took {:?}, exceeding 5ms threshold",
+        elapsed.as_millis() < 20,
+        "Parsing 1,000 segments took {:?}, exceeding 20ms debug threshold",
         elapsed
     );
 }

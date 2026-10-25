@@ -66,4 +66,17 @@ pub trait NetworkTransport: Send + Sync + 'static {
         range: ByteRange,
         context: &SessionContext,
     ) -> Result<Pin<Box<dyn ByteStream>>, NetworkError>;
+    async fn open_stream(
+        &self,
+        url: &str,
+        context: &SessionContext,
+    ) -> Result<Pin<Box<dyn ByteStream>>, NetworkError> {
+        let probe = self.probe(url, context).await?;
+        let end = probe
+            .total_bytes
+            .map(|t| t.saturating_sub(1))
+            .unwrap_or(u64::MAX - 1);
+        self.open_range_stream(url, ByteRange::new(0, end), context)
+            .await
+    }
 }
