@@ -4,10 +4,14 @@ import { Sidebar } from "sidebar.slint";
 import { TaskTable, TaskRowData } from "task_table.slint";
 import { TaskDisplayStatus } from "status_pill.slint";
 import { Inspector, InspectorDetails, ChunkSlice, WorkerCursor } from "inspector.slint";
+import { AddDownloadModal, AddTaskFormData } from "add_dialog.slint";
+import { PreferencesModal, UserSettingsData } from "settings_modal.slint";
 
 export { TaskRowData }
 export { TaskDisplayStatus }
 export { InspectorDetails, ChunkSlice, WorkerCursor }
+export { AddTaskFormData }
+export { UserSettingsData }
 
 export component MainWindow inherits Window {
     title: "FetchTrek Download Manager";
@@ -32,6 +36,12 @@ export component MainWindow inherits Window {
     in-out property <bool> is_inspector_expanded: true;
     in-out property <InspectorDetails> inspector_details;
 
+    // Modals
+    in-out property <bool> show_add_modal: false;
+    in-out property <bool> show_settings_modal: false;
+    in-out property <AddTaskFormData> add_form_data;
+    in-out property <UserSettingsData> settings_data;
+
     callback add_download_clicked();
     callback resume_all_clicked();
     callback pause_all_clicked();
@@ -48,6 +58,32 @@ export component MainWindow inherits Window {
     callback deselect_all_clicked();
     callback open_folder_clicked(string);
     callback copy_url_clicked(string);
+
+    // Modal callbacks
+    callback add_modal_submit(AddTaskFormData);
+    callback add_modal_cancel();
+    callback add_modal_paste_clipboard();
+    callback add_modal_browse_path();
+    callback settings_modal_save(UserSettingsData);
+    callback settings_modal_cancel();
+    callback settings_modal_browse_path();
+
+    forward-focus: key_handler;
+    key_handler := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                if root.show_add_modal {
+                    root.add_modal_cancel();
+                    return accept;
+                }
+                if root.show_settings_modal {
+                    root.settings_modal_cancel();
+                    return accept;
+                }
+            }
+            reject
+        }
+    }
 
     VerticalLayout {
         spacing: 0px;
@@ -106,6 +142,46 @@ export component MainWindow inherits Window {
                     inspector_cancel_clicked(id) => { root.row_delete(id); }
                 }
             }
+        }
+    }
+
+    // Modal Dialog Overlays with Scrim
+    if root.show_add_modal : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: #00000099;
+
+        TouchArea {
+            clicked => { root.add_modal_cancel(); }
+        }
+
+        AddDownloadModal {
+            form_data <=> root.add_form_data;
+            submit(data) => { root.add_modal_submit(data); }
+            cancel => { root.add_modal_cancel(); }
+            paste_clipboard => { root.add_modal_paste_clipboard(); }
+            browse_destination => { root.add_modal_browse_path(); }
+        }
+    }
+
+    if root.show_settings_modal : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: #00000099;
+
+        TouchArea {
+            clicked => { root.settings_modal_cancel(); }
+        }
+
+        PreferencesModal {
+            settings <=> root.settings_data;
+            save(data) => { root.settings_modal_save(data); }
+            cancel => { root.settings_modal_cancel(); }
+            browse_default_path => { root.settings_modal_browse_path(); }
         }
     }
 }

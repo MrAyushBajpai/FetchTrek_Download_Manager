@@ -1,0 +1,699 @@
+import { DesignTokens } from "tokens.slint";
+
+export struct AddTaskFormData {
+    url: string,
+    destination_path: string,
+    filename: string,
+    connections: int,
+    referer: string,
+    user_agent: string,
+    cookies: string,
+    store_in_vault: bool,
+}
+
+component DialogButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon: "";
+    in property <bool> is-primary: false;
+    callback clicked();
+
+    height: 36px;
+    border-radius: 6px;
+    border-width: root.is-primary ? 0px : 1px;
+    border-color: DesignTokens.border-hairline;
+    background: touch.pressed ? (root.is-primary ? DesignTokens.primary-blue.darker(0.2) : DesignTokens.surface-hover.darker(0.1)) :
+                touch.has-hover ? (root.is-primary ? DesignTokens.primary-blue-hover : DesignTokens.surface-hover) :
+                (root.is-primary ? DesignTokens.primary-blue : DesignTokens.surface-card);
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 6px;
+        alignment: center;
+
+        if root.icon != "" : Text {
+            text: root.icon;
+            font-size: 13px;
+            color: root.is-primary ? #ffffff : DesignTokens.text-primary;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.text;
+            font-size: 13px;
+            font-weight: root.is-primary ? 700 : 600;
+            color: root.is-primary ? #ffffff : DesignTokens.text-primary;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component TabButton inherits Rectangle {
+    in property <string> label;
+    in property <string> icon: "";
+    in property <bool> is-active: false;
+    in property <bool> is-disabled: false;
+    in property <string> badge: "";
+    callback clicked();
+
+    height: 34px;
+    border-radius: 6px;
+    background: root.is-active ? DesignTokens.surface-card :
+                (root.is-disabled ? transparent :
+                 (touch.has-hover ? DesignTokens.surface-hover : transparent));
+    border-width: root.is-active ? 1px : 0px;
+    border-color: root.is-active ? DesignTokens.border-hairline : transparent;
+
+    touch := TouchArea {
+        enabled: !root.is-disabled;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+        alignment: center;
+
+        if root.icon != "" : Text {
+            text: root.icon;
+            font-size: 12px;
+            color: root.is-disabled ? DesignTokens.text-muted :
+                   (root.is-active ? DesignTokens.text-primary : DesignTokens.text-secondary);
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.label;
+            font-size: 12px;
+            font-weight: root.is-active ? 700 : 500;
+            color: root.is-disabled ? DesignTokens.text-muted :
+                   (root.is-active ? DesignTokens.text-primary : DesignTokens.text-secondary);
+            vertical-alignment: center;
+        }
+
+        if root.badge != "" : Rectangle {
+            height: 16px;
+            border-radius: 4px;
+            background: DesignTokens.surface-inset;
+            border-width: 1px;
+            border-color: DesignTokens.border-hairline;
+            HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 4px;
+                Text {
+                    text: root.badge;
+                    font-size: 9px;
+                    font-weight: 700;
+                    color: DesignTokens.status-amber;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+export component AddDownloadModal inherits Rectangle {
+    in-out property <AddTaskFormData> form_data: {
+        url: "",
+        destination_path: "C:\\Downloads",
+        filename: "",
+        connections: 4,
+        referer: "",
+        user_agent: "",
+        cookies: "",
+        store_in_vault: true,
+    };
+
+    in-out property <int> active_tab: 0; // 0: URL, 1: Torrent, 2: Batch, 3: Import
+    in-out property <bool> is_advanced_open: false;
+
+    callback submit(AddTaskFormData);
+    callback cancel();
+    callback paste_clipboard();
+    callback browse_destination();
+
+    width: 580px;
+    border-radius: 12px;
+    background: DesignTokens.surface-sidebar;
+    border-width: 1px;
+    border-color: DesignTokens.border-focus;
+    clip: true;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 16px;
+
+        // Modal Header
+        HorizontalLayout {
+            alignment: space-between;
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+
+                Text {
+                    text: "📥";
+                    font-size: 16px;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "Add New Download";
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: DesignTokens.text-primary;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 6px;
+                background: close_touch.has-hover ? DesignTokens.surface-hover : transparent;
+
+                close_touch := TouchArea {
+                    clicked => { root.cancel(); }
+                }
+
+                Text {
+                    text: "✕";
+                    font-size: 14px;
+                    color: DesignTokens.text-secondary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Source Type Tabs
+        Rectangle {
+            height: 40px;
+            border-radius: 8px;
+            background: DesignTokens.surface-inset;
+            border-width: 1px;
+            border-color: DesignTokens.border-hairline;
+
+            HorizontalLayout {
+                padding: 3px;
+                spacing: 4px;
+
+                TabButton {
+                    label: "URL (HTTP/S)";
+                    icon: "🔗";
+                    is-active: root.active_tab == 0;
+                    clicked => { root.active_tab = 0; }
+                }
+
+                TabButton {
+                    label: "Torrent";
+                    icon: "🧲";
+                    badge: "M4";
+                    is-active: root.active_tab == 1;
+                    is-disabled: true;
+                }
+
+                TabButton {
+                    label: "Batch Links";
+                    icon: "📑";
+                    is-active: root.active_tab == 2;
+                    clicked => { root.active_tab = 2; }
+                }
+
+                TabButton {
+                    label: "Import File";
+                    icon: "📄";
+                    is-active: root.active_tab == 3;
+                    clicked => { root.active_tab = 3; }
+                }
+            }
+        }
+
+        // URL Input Well
+        VerticalLayout {
+            spacing: 6px;
+
+            Text {
+                text: "Source URL";
+                font-size: 12px;
+                font-weight: 600;
+                color: DesignTokens.text-secondary;
+            }
+
+            Rectangle {
+                height: 38px;
+                background: DesignTokens.surface-input;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: url_input.has-focus ? DesignTokens.border-selected : DesignTokens.border-hairline;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 6px;
+                    spacing: 8px;
+
+                    Rectangle {
+                        clip: true;
+
+                        if url_input.text == "" : Text {
+                            text: "https://example.com/file.zip or magnet link";
+                            font-size: 12px;
+                            color: DesignTokens.text-muted;
+                            vertical-alignment: center;
+                        }
+
+                        url_input := TextInput {
+                            text <=> root.form_data.url;
+                            font-size: 12px;
+                            color: DesignTokens.text-primary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Paste button
+                    Rectangle {
+                        width: 60px;
+                        height: 28px;
+                        border-radius: 4px;
+                        background: paste_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+                        border-width: 1px;
+                        border-color: DesignTokens.border-hairline;
+
+                        paste_touch := TouchArea {
+                            clicked => { root.paste_clipboard(); }
+                        }
+
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            Text {
+                                text: "📋 Paste";
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: DesignTokens.text-primary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Destination Path & Filename Row
+        HorizontalLayout {
+            spacing: 12px;
+
+            // Destination Folder
+            VerticalLayout {
+                horizontal-stretch: 1.0;
+                spacing: 6px;
+
+                Text {
+                    text: "Save Directory";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: DesignTokens.text-secondary;
+                }
+
+                Rectangle {
+                    height: 36px;
+                    background: DesignTokens.surface-input;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: dest_input.has-focus ? DesignTokens.border-selected : DesignTokens.border-hairline;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 6px;
+                        spacing: 6px;
+
+                        Rectangle {
+                            clip: true;
+                            dest_input := TextInput {
+                                text <=> root.form_data.destination_path;
+                                font-size: 12px;
+                                color: DesignTokens.text-primary;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 68px;
+                            height: 26px;
+                            border-radius: 4px;
+                            background: browse_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+                            border-width: 1px;
+                            border-color: DesignTokens.border-hairline;
+
+                            browse_touch := TouchArea {
+                                clicked => { root.browse_destination(); }
+                            }
+
+                            HorizontalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Browse...";
+                                    font-size: 11px;
+                                    font-weight: 500;
+                                    color: DesignTokens.text-primary;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Filename
+            VerticalLayout {
+                width: 160px;
+                spacing: 6px;
+
+                Text {
+                    text: "Filename (Optional)";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: DesignTokens.text-secondary;
+                }
+
+                Rectangle {
+                    height: 36px;
+                    background: DesignTokens.surface-input;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: fn_input.has-focus ? DesignTokens.border-selected : DesignTokens.border-hairline;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+
+                        Rectangle {
+                            clip: true;
+
+                            if fn_input.text == "" : Text {
+                                text: "Auto-detect";
+                                font-size: 12px;
+                                color: DesignTokens.text-muted;
+                                vertical-alignment: center;
+                            }
+
+                            fn_input := TextInput {
+                                text <=> root.form_data.filename;
+                                font-size: 12px;
+                                color: DesignTokens.text-primary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Parallel Connections Stepper
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: space-between;
+
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "Parallel Sockets (Connections)";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: DesignTokens.text-secondary;
+                }
+                Text {
+                    text: "Segments streamed simultaneously (1 to 32)";
+                    font-size: 11px;
+                    color: DesignTokens.text-muted;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: center;
+                spacing: 8px;
+
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 4px;
+                    background: minus_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+                    border-width: 1px;
+                    border-color: DesignTokens.border-hairline;
+
+                    minus_touch := TouchArea {
+                        clicked => {
+                            if root.form_data.connections > 1 {
+                                root.form_data.connections -= 1;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "−";
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: DesignTokens.text-primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    background: DesignTokens.surface-inset;
+                    border-width: 1px;
+                    border-color: DesignTokens.border-hairline;
+
+                    Text {
+                        text: "\{root.form_data.connections}";
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: DesignTokens.primary-blue;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 4px;
+                    background: plus_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+                    border-width: 1px;
+                    border-color: DesignTokens.border-hairline;
+
+                    plus_touch := TouchArea {
+                        clicked => {
+                            if root.form_data.connections < 32 {
+                                root.form_data.connections += 1;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "+";
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: DesignTokens.text-primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Collapsible Advanced Options Toggle
+        Rectangle {
+            height: 32px;
+            border-radius: 6px;
+            background: adv_touch.has-hover ? DesignTokens.surface-hover : transparent;
+
+            adv_touch := TouchArea {
+                clicked => { root.is_advanced_open = !root.is_advanced_open; }
+            }
+
+            HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 4px;
+                spacing: 6px;
+
+                Text {
+                    text: root.is_advanced_open ? "▲" : "▼";
+                    font-size: 10px;
+                    color: DesignTokens.text-secondary;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "Advanced Options (HTTP Headers, Cookies & Vault)";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: DesignTokens.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Expanded Advanced Options Drawer
+        if root.is_advanced_open : VerticalLayout {
+            spacing: 10px;
+
+            // Referer
+            HorizontalLayout {
+                spacing: 12px;
+
+                VerticalLayout {
+                    horizontal-stretch: 1.0;
+                    spacing: 4px;
+
+                    Text {
+                        text: "Custom Referer";
+                        font-size: 11px;
+                        color: DesignTokens.text-muted;
+                    }
+
+                    Rectangle {
+                        height: 32px;
+                        background: DesignTokens.surface-input;
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: DesignTokens.border-hairline;
+
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            TextInput {
+                                text <=> root.form_data.referer;
+                                font-size: 11px;
+                                color: DesignTokens.text-primary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    horizontal-stretch: 1.0;
+                    spacing: 4px;
+
+                    Text {
+                        text: "Custom User-Agent";
+                        font-size: 11px;
+                        color: DesignTokens.text-muted;
+                    }
+
+                    Rectangle {
+                        height: 32px;
+                        background: DesignTokens.surface-input;
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: DesignTokens.border-hairline;
+
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            TextInput {
+                                text <=> root.form_data.user_agent;
+                                font-size: 11px;
+                                color: DesignTokens.text-primary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // HTTP Cookies
+            VerticalLayout {
+                spacing: 4px;
+
+                Text {
+                    text: "HTTP Cookies (e.g. cf_clearance=...; session=...)";
+                    font-size: 11px;
+                    color: DesignTokens.text-muted;
+                }
+
+                Rectangle {
+                    height: 32px;
+                    background: DesignTokens.surface-input;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: DesignTokens.border-hairline;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        TextInput {
+                            text <=> root.form_data.cookies;
+                            font-size: 11px;
+                            color: DesignTokens.text-primary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // Vault checkbox
+            HorizontalLayout {
+                spacing: 8px;
+
+                Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.form_data.store_in_vault ? DesignTokens.primary-blue : DesignTokens.border-hairline;
+                    background: root.form_data.store_in_vault ? DesignTokens.primary-blue : DesignTokens.surface-input;
+
+                    check_touch := TouchArea {
+                        clicked => { root.form_data.store_in_vault = !root.form_data.store_in_vault; }
+                    }
+
+                    if root.form_data.store_in_vault : Text {
+                        text: "✓";
+                        font-size: 12px;
+                        font-weight: 700;
+                        color: #ffffff;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Text {
+                    text: "Store authentication credentials in OS Credential Vault (DPAPI / Keychain)";
+                    font-size: 11px;
+                    color: DesignTokens.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Action Footer
+        HorizontalLayout {
+            padding-top: 8px;
+            spacing: 12px;
+            alignment: end;
+
+            DialogButton {
+                text: "Cancel";
+                is-primary: false;
+                clicked => { root.cancel(); }
+            }
+
+            DialogButton {
+                text: "Add Download";
+                icon: "📥";
+                is-primary: true;
+                clicked => { root.submit(root.form_data); }
+            }
+        }
+    }
+}

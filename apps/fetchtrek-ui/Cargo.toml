@@ -8,6 +8,19 @@ fetchtrek-types = { path = "../../crates/fetchtrek-types" }
 fetchtrek-ipc = { path = "../../crates/fetchtrek-ipc" }
 slint = "1.8"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+] }
 
 [build-dependencies]
 slint-build = "1.8"
+

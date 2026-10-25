@@ -1,14 +1,19 @@
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 use fetchtrek_ipc::TaskSummary;
 use fetchtrek_types::TaskState;
 use slint::VecModel;
 
+mod clipboard;
+mod config;
 mod ipc_bridge;
 mod store;
+mod tray;
 
 use ipc_bridge::UiCommand;
 use store::{init_store, with_store, with_store_mut};
+use tray::TrayAction;
 
 slint::include_modules!();
 
@@ -111,10 +116,43 @@ fn main() -> Result<(), slint::PlatformError> {
     main_window.set_daemon_status("Connecting...".into());
     init_store(tasks_model);
 
+    // Load persisted settings and synchronize Slint model
+    let initial_settings = config::load_settings();
+    let current_settings = Arc::new(RwLock::new(initial_settings.clone()));
+
+    let slint_settings = UserSettingsData {
+        theme_mode: initial_settings.theme_mode,
+        start_on_boot: initial_settings.start_on_boot,
+        minimize_to_tray: initial_settings.minimize_to_tray,
+        show_notifications: initial_settings.show_notifications,
+        default_download_path: initial_settings.default_download_path.clone().into(),
+        sparse_preallocation: initial_settings.sparse_preallocation,
+        cursor_rewind_kb: initial_settings.cursor_rewind_kb,
+        global_speed_limit_mb: initial_settings.global_speed_limit_mb,
+        max_active_tasks: initial_settings.max_active_tasks,
+        default_connections: initial_settings.default_connections,
+    };
+    main_window.set_settings_data(slint_settings);
+
+    // Intercept window close request for minimize-to-tray lifecycle
+    {
+        let settings_for_close = current_settings.clone();
+        main_window.window().on_close_requested(move || {
+            let minimize = settings_for_close
+                .read()
+                .map(|s| s.minimize_to_tray)
+                .unwrap_or(true);
+            if minimize {
+                slint::CloseRequestResponse::HideWindow
+            } else {
+                std::process::exit(0);
+            }
+        });
+    }
+
     // Seed mock data for immediate standalone visualization
     with_store_mut(|st| {
         st.set_initial_tasks(create_initial_mock_summaries(), &main_window);
-        // Pre-populate some history points for task 1 to show sparkline
         if let Some(record) = st.tasks.get_mut(&1) {
             for i in 0..60 {
                 let speed = 12_000_000 + ((i * 350_000) % 8_000_000);
@@ -125,6 +163,43 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let bridge = ipc_bridge::start_ipc_bridge(main_window.as_weak());
+
+    // Initialize System Tray
+    {
+        let weak_win = main_window.as_weak();
+        let tray_cmd_tx = bridge.command_tx.clone();
+        tray::init_tray(move |action| match action {
+            TrayAction::ShowWindow => {
+                let weak = weak_win.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(win) = weak.upgrade() {
+                        let _ = win.show();
+                    }
+                });
+            }
+            TrayAction::PauseAll => {
+                let tx = tray_cmd_tx.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let active = with_store(|st| st.get_active_ids()).unwrap_or_default();
+                    for id in active {
+                        let _ = tx.try_send(UiCommand::PauseTask(id));
+                    }
+                });
+            }
+            TrayAction::ResumeAll => {
+                let tx = tray_cmd_tx.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let paused = with_store(|st| st.get_paused_or_queued_ids()).unwrap_or_default();
+                    for id in paused {
+                        let _ = tx.try_send(UiCommand::ResumeTask(id));
+                    }
+                });
+            }
+            TrayAction::Quit => {
+                std::process::exit(0);
+            }
+        });
+    }
 
     // Row selection toggle & inspector focus
     {
@@ -262,11 +337,121 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // Toolbar actions
-    main_window.on_add_download_clicked(move || {
-        println!("Add URL modal requested");
-    });
+    // Open Add Download Modal
+    {
+        let weak_win = main_window.as_weak();
+        let settings_ref = current_settings.clone();
+        main_window.on_add_download_clicked(move || {
+            if let Some(win) = weak_win.upgrade() {
+                let cur_dest = settings_ref
+                    .read()
+                    .map(|s| s.default_download_path.clone())
+                    .unwrap_or_else(|_| "C:\\Downloads".to_string());
+                let cur_conns = settings_ref
+                    .read()
+                    .map(|s| s.default_connections)
+                    .unwrap_or(4);
+                let detected_url = clipboard::inspect_clipboard_for_url().unwrap_or_default();
+                let form = AddTaskFormData {
+                    url: detected_url.into(),
+                    destination_path: cur_dest.into(),
+                    filename: "".into(),
+                    connections: cur_conns,
+                    referer: "".into(),
+                    user_agent: "".into(),
+                    cookies: "".into(),
+                    store_in_vault: true,
+                };
+                win.set_add_form_data(form);
+                win.set_show_add_modal(true);
+            }
+        });
+    }
 
+    // Modal Paste Clipboard
+    {
+        let weak_win = main_window.as_weak();
+        main_window.on_add_modal_paste_clipboard(move || {
+            if let Some(win) = weak_win.upgrade() {
+                if let Some(text) = clipboard::read_clipboard_text() {
+                    let mut data = win.get_add_form_data();
+                    data.url = text.trim().into();
+                    win.set_add_form_data(data);
+                }
+            }
+        });
+    }
+
+    // Modal Browse Path
+    {
+        let weak_win = main_window.as_weak();
+        main_window.on_add_modal_browse_path(move || {
+            if let Some(win) = weak_win.upgrade() {
+                let mut data = win.get_add_form_data();
+                data.destination_path = config::get_default_download_dir().into();
+                win.set_add_form_data(data);
+            }
+        });
+    }
+
+    // Modal Cancel
+    {
+        let weak_win = main_window.as_weak();
+        main_window.on_add_modal_cancel(move || {
+            if let Some(win) = weak_win.upgrade() {
+                win.set_show_add_modal(false);
+            }
+        });
+    }
+
+    // Modal Submit
+    {
+        let weak_win = main_window.as_weak();
+        let cmd_tx = bridge.command_tx.clone();
+        main_window.on_add_modal_submit(move |form| {
+            if let Some(win) = weak_win.upgrade() {
+                win.set_show_add_modal(false);
+                let url = form.url.trim().to_string();
+                if !url.is_empty() {
+                    let dest = if form.destination_path.trim().is_empty() {
+                        None
+                    } else {
+                        Some(form.destination_path.trim().to_string())
+                    };
+                    let filename = if form.filename.trim().is_empty() {
+                        url.rsplit('/')
+                            .next()
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.split('?').next().unwrap_or(s).to_string())
+                    } else {
+                        Some(form.filename.trim().to_string())
+                    };
+                    let conns = Some(form.connections as usize);
+
+                    let _ = cmd_tx.try_send(UiCommand::AddTask {
+                        url: url.clone(),
+                        destination_path: dest.clone(),
+                        filename: filename.clone(),
+                        connections: conns,
+                    });
+
+                    let task_name = filename.unwrap_or_else(|| "download.bin".to_string());
+                    let dest_path = dest.unwrap_or_else(|| "C:\\Downloads".to_string());
+                    let new_id = with_store(|st| st.tasks.keys().max().copied().unwrap_or(0) + 1)
+                        .unwrap_or(1);
+
+                    let mut record = store::TaskModelRecord::new(new_id, task_name, url, dest_path);
+                    record.connection_count = form.connections.max(1) as usize;
+                    record.status = fetchtrek_types::TaskState::Transferring;
+                    with_store_mut(|st| {
+                        st.add_task(record, &win);
+                    });
+                }
+            }
+        });
+    }
+
+    // Resume All
     {
         let cmd_tx = bridge.command_tx.clone();
         main_window.on_resume_all_clicked(move || {
@@ -277,8 +462,9 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // Pause All
     {
-        let cmd_tx = bridge.command_tx;
+        let cmd_tx = bridge.command_tx.clone();
         main_window.on_pause_all_clicked(move || {
             let active = with_store(|st| st.get_active_ids()).unwrap_or_default();
             for id in active {
@@ -287,9 +473,64 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    main_window.on_settings_clicked(move || {
-        println!("Settings drawer requested");
-    });
+    // Open Settings Modal
+    {
+        let weak_win = main_window.as_weak();
+        main_window.on_settings_clicked(move || {
+            if let Some(win) = weak_win.upgrade() {
+                win.set_show_settings_modal(true);
+            }
+        });
+    }
+
+    // Settings Modal Cancel
+    {
+        let weak_win = main_window.as_weak();
+        main_window.on_settings_modal_cancel(move || {
+            if let Some(win) = weak_win.upgrade() {
+                win.set_show_settings_modal(false);
+            }
+        });
+    }
+
+    // Settings Modal Save
+    {
+        let weak_win = main_window.as_weak();
+        let settings_ref = current_settings.clone();
+        main_window.on_settings_modal_save(move |data| {
+            if let Some(win) = weak_win.upgrade() {
+                win.set_show_settings_modal(false);
+                let updated = config::UserSettingsData {
+                    theme_mode: data.theme_mode,
+                    start_on_boot: data.start_on_boot,
+                    minimize_to_tray: data.minimize_to_tray,
+                    show_notifications: data.show_notifications,
+                    default_download_path: data.default_download_path.to_string(),
+                    sparse_preallocation: data.sparse_preallocation,
+                    cursor_rewind_kb: data.cursor_rewind_kb,
+                    global_speed_limit_mb: data.global_speed_limit_mb,
+                    max_active_tasks: data.max_active_tasks,
+                    default_connections: data.default_connections,
+                };
+                let _ = config::save_settings(&updated);
+                if let Ok(mut lock) = settings_ref.write() {
+                    *lock = updated;
+                }
+            }
+        });
+    }
+
+    // Settings Modal Browse Path
+    {
+        let weak_win = main_window.as_weak();
+        main_window.on_settings_modal_browse_path(move || {
+            if let Some(win) = weak_win.upgrade() {
+                let mut data = win.get_settings_data();
+                data.default_download_path = config::get_default_download_dir().into();
+                win.set_settings_data(data);
+            }
+        });
+    }
 
     main_window.on_search_query_changed(move |query| {
         println!("Search query updated: {}", query);

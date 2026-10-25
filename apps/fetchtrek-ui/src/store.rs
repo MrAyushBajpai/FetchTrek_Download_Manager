@@ -280,6 +280,19 @@ impl TaskStore {
         self.update_inspector(window);
     }
 
+    pub fn add_task(&mut self, record: TaskModelRecord, window: &MainWindow) {
+        let id = record.id;
+        let row_data = record.to_row_data();
+        self.tasks.insert(id, record);
+        self.id_order.push(id);
+        self.slint_model.push(row_data);
+        if self.selected_task_id.is_none() {
+            self.selected_task_id = Some(id);
+        }
+        self.refresh_counts(window);
+        self.update_inspector(window);
+    }
+
     pub fn apply_telemetry(&mut self, snapshot: &TelemetrySnapshot, window: &MainWindow) {
         for p in &snapshot.tasks {
             if let Some(record) = self.tasks.get_mut(&p.task_id) {

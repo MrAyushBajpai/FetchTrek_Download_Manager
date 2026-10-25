@@ -1,0 +1,888 @@
+import { DesignTokens } from "tokens.slint";
+
+export struct UserSettingsData {
+    theme_mode: int, // 0: Auto, 1: Dark, 2: Light, 3: OLED
+    start_on_boot: bool,
+    minimize_to_tray: bool,
+    show_notifications: bool,
+    default_download_path: string,
+    sparse_preallocation: bool,
+    cursor_rewind_kb: int,
+    global_speed_limit_mb: int,
+    max_active_tasks: int,
+    default_connections: int,
+}
+
+component SettingsButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon: "";
+    in property <bool> is-primary: false;
+    callback clicked();
+
+    height: 34px;
+    border-radius: 6px;
+    border-width: root.is-primary ? 0px : 1px;
+    border-color: DesignTokens.border-hairline;
+    background: touch.pressed ? (root.is-primary ? DesignTokens.primary-blue.darker(0.2) : DesignTokens.surface-hover.darker(0.1)) :
+                touch.has-hover ? (root.is-primary ? DesignTokens.primary-blue-hover : DesignTokens.surface-hover) :
+                (root.is-primary ? DesignTokens.primary-blue : DesignTokens.surface-card);
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 6px;
+        alignment: center;
+
+        if root.icon != "" : Text {
+            text: root.icon;
+            font-size: 12px;
+            color: root.is-primary ? #ffffff : DesignTokens.text-primary;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.text;
+            font-size: 12px;
+            font-weight: root.is-primary ? 700 : 600;
+            color: root.is-primary ? #ffffff : DesignTokens.text-primary;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component NavRailItem inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> is-active: false;
+    callback clicked();
+
+    height: 38px;
+    border-radius: 6px;
+    background: root.is-active ? DesignTokens.surface-card :
+                (touch.has-hover ? DesignTokens.surface-hover : transparent);
+    border-width: root.is-active ? 1px : 0px;
+    border-color: root.is-active ? DesignTokens.border-hairline : transparent;
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: root.icon;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            font-weight: root.is-active ? 700 : 500;
+            color: root.is-active ? DesignTokens.text-primary : DesignTokens.text-secondary;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component ThemeCard inherits Rectangle {
+    in property <string> title;
+    in property <color> preview-color;
+    in property <bool> is-selected: false;
+    callback clicked();
+
+    height: 70px;
+    horizontal-stretch: 1.0;
+    border-radius: 8px;
+    background: DesignTokens.surface-input;
+    border-width: root.is-selected ? 2px : 1px;
+    border-color: root.is-selected ? DesignTokens.primary-blue : DesignTokens.border-hairline;
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+        alignment: center;
+
+        Rectangle {
+            width: 32px;
+            height: 20px;
+            border-radius: 4px;
+            background: root.preview-color;
+            border-width: 1px;
+            border-color: #ffffff.with-alpha(0.2);
+        }
+
+        Text {
+            text: root.title;
+            font-size: 11px;
+            font-weight: root.is-selected ? 700 : 500;
+            color: root.is-selected ? DesignTokens.text-primary : DesignTokens.text-secondary;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+component CheckboxRow inherits HorizontalLayout {
+    in-out property <bool> checked: false;
+    in property <string> label;
+    in property <string> description: "";
+
+    spacing: 10px;
+
+    Rectangle {
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        border-width: 1px;
+        border-color: root.checked ? DesignTokens.primary-blue : DesignTokens.border-hairline;
+        background: root.checked ? DesignTokens.primary-blue : DesignTokens.surface-input;
+
+        TouchArea {
+            clicked => { root.checked = !root.checked; }
+        }
+
+        if root.checked : Text {
+            text: "✓";
+            font-size: 12px;
+            font-weight: 700;
+            color: #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 2px;
+        alignment: center;
+
+        Text {
+            text: root.label;
+            font-size: 12px;
+            font-weight: 600;
+            color: DesignTokens.text-primary;
+            vertical-alignment: center;
+        }
+
+        if root.description != "" : Text {
+            text: root.description;
+            font-size: 11px;
+            color: DesignTokens.text-muted;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component PreferencesModal inherits Rectangle {
+    in-out property <UserSettingsData> settings: {
+        theme_mode: 1,
+        start_on_boot: false,
+        minimize_to_tray: true,
+        show_notifications: true,
+        default_download_path: "C:\\Downloads",
+        sparse_preallocation: true,
+        cursor_rewind_kb: 64,
+        global_speed_limit_mb: 0,
+        max_active_tasks: 5,
+        default_connections: 4,
+    };
+
+    in-out property <int> active_pane: 0; // 0: General, 1: Engine, 2: Network, 3: Security
+
+    callback save(UserSettingsData);
+    callback cancel();
+    callback browse_default_path();
+
+    width: 680px;
+    height: 520px;
+    border-radius: 12px;
+    background: DesignTokens.surface-sidebar;
+    border-width: 1px;
+    border-color: DesignTokens.border-focus;
+    clip: true;
+
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // Modal Header
+        Rectangle {
+            height: 52px;
+            background: DesignTokens.surface-sidebar;
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: DesignTokens.border-hairline;
+            }
+
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                alignment: space-between;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    Text {
+                        text: "⚙️";
+                        font-size: 16px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "Preferences & Settings";
+                        font-size: 15px;
+                        font-weight: 700;
+                        color: DesignTokens.text-primary;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 6px;
+                    background: close_touch.has-hover ? DesignTokens.surface-hover : transparent;
+
+                    close_touch := TouchArea {
+                        clicked => { root.cancel(); }
+                    }
+
+                    Text {
+                        text: "✕";
+                        font-size: 14px;
+                        color: DesignTokens.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Two-Pane Navigation Body
+        HorizontalLayout {
+            vertical-stretch: 1.0;
+            spacing: 0px;
+
+            // Left Navigation Rail (170px)
+            Rectangle {
+                width: 170px;
+                background: DesignTokens.surface-inset;
+                Rectangle {
+                    x: parent.width - 1px;
+                    width: 1px;
+                    background: DesignTokens.border-hairline;
+                }
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 4px;
+                    alignment: start;
+
+                    NavRailItem {
+                        label: "General";
+                        icon: "⚙";
+                        is-active: root.active_pane == 0;
+                        clicked => { root.active_pane = 0; }
+                    }
+
+                    NavRailItem {
+                        label: "Engine & Storage";
+                        icon: "💾";
+                        is-active: root.active_pane == 1;
+                        clicked => { root.active_pane = 1; }
+                    }
+
+                    NavRailItem {
+                        label: "Network & Limiter";
+                        icon: "⚡";
+                        is-active: root.active_pane == 2;
+                        clicked => { root.active_pane = 2; }
+                    }
+
+                    NavRailItem {
+                        label: "Security & IPC";
+                        icon: "🛡";
+                        is-active: root.active_pane == 3;
+                        clicked => { root.active_pane = 3; }
+                    }
+                }
+            }
+
+            // Right Content Canvas
+            Rectangle {
+                horizontal-stretch: 1.0;
+                background: DesignTokens.surface-void;
+
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 16px;
+
+                    // Pane 0: General
+                    if root.active_pane == 0 : VerticalLayout {
+                        spacing: 16px;
+
+                        // Theme Selection
+                        VerticalLayout {
+                            spacing: 8px;
+
+                            Text {
+                                text: "Interface Appearance";
+                                font-size: 13px;
+                                font-weight: 700;
+                                color: DesignTokens.text-primary;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+
+                                ThemeCard {
+                                    title: "Auto (OS)";
+                                    preview-color: #334155;
+                                    is-selected: root.settings.theme_mode == 0;
+                                    clicked => { root.settings.theme_mode = 0; }
+                                }
+
+                                ThemeCard {
+                                    title: "Dark";
+                                    preview-color: #0d1117;
+                                    is-selected: root.settings.theme_mode == 1;
+                                    clicked => { root.settings.theme_mode = 1; }
+                                }
+
+                                ThemeCard {
+                                    title: "Light";
+                                    preview-color: #f8fafc;
+                                    is-selected: root.settings.theme_mode == 2;
+                                    clicked => { root.settings.theme_mode = 2; }
+                                }
+
+                                ThemeCard {
+                                    title: "OLED Black";
+                                    preview-color: #000000;
+                                    is-selected: root.settings.theme_mode == 3;
+                                    clicked => { root.settings.theme_mode = 3; }
+                                }
+                            }
+                        }
+
+                        // Window Behavior
+                        VerticalLayout {
+                            spacing: 10px;
+
+                            Text {
+                                text: "Window & Tray Behavior";
+                                font-size: 13px;
+                                font-weight: 700;
+                                color: DesignTokens.text-primary;
+                            }
+
+                            CheckboxRow {
+                                checked <=> root.settings.start_on_boot;
+                                label: "Start FetchTrek minimized on system boot";
+                                description: "Launches headless daemon in background on logon";
+                            }
+
+                            CheckboxRow {
+                                checked <=> root.settings.minimize_to_tray;
+                                label: "Minimize to system tray on window close";
+                                description: "Keeps active transfers running in background";
+                            }
+
+                            CheckboxRow {
+                                checked <=> root.settings.show_notifications;
+                                label: "Show native OS toast notification on download completion";
+                                description: "Displays completion banner with 'Open File' action";
+                            }
+                        }
+                    }
+
+                    // Pane 1: Engine & Storage
+                    if root.active_pane == 1 : VerticalLayout {
+                        spacing: 16px;
+
+                        Text {
+                            text: "Storage Engine & Positional Allocations";
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: DesignTokens.text-primary;
+                        }
+
+                        // Default download directory
+                        VerticalLayout {
+                            spacing: 6px;
+
+                            Text {
+                                text: "Default Download Directory";
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: DesignTokens.text-secondary;
+                            }
+
+                            Rectangle {
+                                height: 36px;
+                                background: DesignTokens.surface-input;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: DesignTokens.border-hairline;
+
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 6px;
+                                    spacing: 6px;
+
+                                    Rectangle {
+                                        clip: true;
+                                        TextInput {
+                                            text <=> root.settings.default_download_path;
+                                            font-size: 12px;
+                                            color: DesignTokens.text-primary;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 68px;
+                                        height: 26px;
+                                        border-radius: 4px;
+                                        background: browse_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+                                        border-width: 1px;
+                                        border-color: DesignTokens.border-hairline;
+
+                                        browse_touch := TouchArea {
+                                            clicked => { root.browse_default_path(); }
+                                        }
+
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            Text {
+                                                text: "Browse...";
+                                                font-size: 11px;
+                                                font-weight: 500;
+                                                color: DesignTokens.text-primary;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        CheckboxRow {
+                            checked <=> root.settings.sparse_preallocation;
+                            label: "Enable instantaneous sparse preallocation (SetEndOfFile / fallocate)";
+                            description: "Prevents disk fragmentation without waiting for full zeroes allocation";
+                        }
+
+                        // Cursor rewind
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: space-between;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Resume Cursor Safety Rewind";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: DesignTokens.text-secondary;
+                                }
+                                Text {
+                                    text: "Bytes re-fetched on resume to guard against dirty socket buffers";
+                                    font-size: 11px;
+                                    color: DesignTokens.text-muted;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: center;
+
+                                Rectangle {
+                                    width: 70px;
+                                    height: 30px;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface-input;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border-hairline;
+
+                                    Text {
+                                        text: "\{root.settings.cursor_rewind_kb} KB";
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        color: DesignTokens.text-primary;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Pane 2: Network & Limiter
+                    if root.active_pane == 2 : VerticalLayout {
+                        spacing: 16px;
+
+                        Text {
+                            text: "Bandwidth Shaping & Concurrency Caps";
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: DesignTokens.text-primary;
+                        }
+
+                        // Speed limit
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: space-between;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Global Download Speed Limit";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: DesignTokens.text-secondary;
+                                }
+                                Text {
+                                    text: "Token-bucket global throttle (0 for unlimited)";
+                                    font-size: 11px;
+                                    color: DesignTokens.text-muted;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: center;
+
+                                Rectangle {
+                                    width: 28px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: minus_limit.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border-hairline;
+
+                                    minus_limit := TouchArea {
+                                        clicked => {
+                                            if root.settings.global_speed_limit_mb > 0 {
+                                                root.settings.global_speed_limit_mb -= 5;
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "−";
+                                        font-size: 14px;
+                                        font-weight: 700;
+                                        color: DesignTokens.text-primary;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 90px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface-input;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border-hairline;
+
+                                    Text {
+                                        text: root.settings.global_speed_limit_mb == 0 ? "Unlimited" : "\{root.settings.global_speed_limit_mb} MB/s";
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        color: root.settings.global_speed_limit_mb == 0 ? DesignTokens.status-green : DesignTokens.status-amber;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 28px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: plus_limit.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border-hairline;
+
+                                    plus_limit := TouchArea {
+                                        clicked => {
+                                            root.settings.global_speed_limit_mb += 5;
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "+";
+                                        font-size: 14px;
+                                        font-weight: 700;
+                                        color: DesignTokens.text-primary;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Max active tasks
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: space-between;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Maximum Concurrent Active Downloads";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: DesignTokens.text-secondary;
+                                }
+                                Text {
+                                    text: "Tasks queued beyond this limit await slots";
+                                    font-size: 11px;
+                                    color: DesignTokens.text-muted;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: center;
+
+                                Rectangle {
+                                    width: 50px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface-input;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border-hairline;
+
+                                    Text {
+                                        text: "\{root.settings.max_active_tasks} tasks";
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        color: DesignTokens.text-primary;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Default connections
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: space-between;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Default Sockets per Task";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: DesignTokens.text-secondary;
+                                }
+                                Text {
+                                    text: "Pre-set socket pool for new incoming downloads";
+                                    font-size: 11px;
+                                    color: DesignTokens.text-muted;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: center;
+
+                                Rectangle {
+                                    width: 50px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface-input;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border-hairline;
+
+                                    Text {
+                                        text: "\{root.settings.default_connections} sockets";
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        color: DesignTokens.primary-blue;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Pane 3: Security & IPC
+                    if root.active_pane == 3 : VerticalLayout {
+                        spacing: 16px;
+
+                        Text {
+                            text: "Security Boundary & Headless Daemon IPC";
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: DesignTokens.text-primary;
+                        }
+
+                        // IPC Pipe
+                        VerticalLayout {
+                            spacing: 6px;
+
+                            Text {
+                                text: "Active IPC Pipe Endpoint";
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: DesignTokens.text-secondary;
+                            }
+
+                            Rectangle {
+                                height: 34px;
+                                background: DesignTokens.surface-input;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: DesignTokens.border-hairline;
+
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text {
+                                        text: "\\\\.\\pipe\\fetchtrek_daemon_{UID}";
+                                        font-size: 11px;
+                                        font-weight: 500;
+                                        color: DesignTokens.text-muted;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Vault Status
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: space-between;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Credential Vault Engine";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: DesignTokens.text-secondary;
+                                }
+                                Text {
+                                    text: "Hardware/OS-backed encrypted credential storage";
+                                    font-size: 11px;
+                                    color: DesignTokens.text-muted;
+                                }
+                            }
+
+                            Rectangle {
+                                height: 26px;
+                                border-radius: 4px;
+                                background: DesignTokens.status-green.with-alpha(0.12);
+                                border-width: 1px;
+                                border-color: DesignTokens.status-green.with-alpha(0.3);
+
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    Text {
+                                        text: "✓ OS DPAPI / Keychain Active";
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        color: DesignTokens.status-green;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Telemetry Status
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: space-between;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Telemetry & Privacy Invariant";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: DesignTokens.text-secondary;
+                                }
+                                Text {
+                                    text: "Zero cloud phoning home, zero usage analytics";
+                                    font-size: 11px;
+                                    color: DesignTokens.text-muted;
+                                }
+                            }
+
+                            Rectangle {
+                                height: 26px;
+                                border-radius: 4px;
+                                background: DesignTokens.primary-blue.with-alpha(0.12);
+                                border-width: 1px;
+                                border-color: DesignTokens.primary-blue.with-alpha(0.3);
+
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    Text {
+                                        text: "🛡 Absolute Zero Telemetry Verified";
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        color: DesignTokens.primary-blue;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Modal Footer
+        Rectangle {
+            height: 52px;
+            background: DesignTokens.surface-sidebar;
+            Rectangle {
+                y: 0px;
+                height: 1px;
+                background: DesignTokens.border-hairline;
+            }
+
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                spacing: 12px;
+                alignment: end;
+
+                SettingsButton {
+                    text: "Cancel";
+                    is-primary: false;
+                    clicked => { root.cancel(); }
+                }
+
+                SettingsButton {
+                    text: "Save Changes";
+                    icon: "✓";
+                    is-primary: true;
+                    clicked => { root.save(root.settings); }
+                }
+            }
+        }
+    }
+}
