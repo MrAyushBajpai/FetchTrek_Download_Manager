@@ -1,0 +1,159 @@
+name: FetchTrek Release (CD)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      is_prerelease:
+        description: 'Mark as Pre-release'
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build-binaries:
+    name: Build Release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: windows-x86_64
+          - os: ubuntu-latest
+            artifact_name: linux-x86_64
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set Release Tag Env
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag_name }}"
+          if [ -z "$TAG" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="v1.0.0"
+          fi
+          echo "RELEASE_TAG=${TAG}" >> $GITHUB_ENV
+
+      - name: Install Linux Dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libx11-dev \
+            libxcursor-dev libxext-dev libxft-dev libxi-dev libxinerama-dev \
+            libxrandr-dev libxrender-dev libsecret-1-dev libxkbcommon-dev \
+            libxkbcommon-x11-dev zip
+
+      - name: Install Rust Stable Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Workspace (Release)
+        run: cargo build --workspace --release
+
+      - name: Package Windows Artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $staging = "fetchtrek-${{ env.RELEASE_TAG }}-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item target/release/fetchtrek-ui.exe $staging/
+          Copy-Item target/release/fetchtrek-daemon.exe $staging/
+          Copy-Item target/release/fetchtrek-cli.exe $staging/
+          Copy-Item target/release/fetchtrek-host.exe $staging/
+          Copy-Item README.md $staging/ -ErrorAction SilentlyContinue
+          Copy-Item LICENSE $staging/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$staging/*" -DestinationPath "dist/fetchtrek-${{ env.RELEASE_TAG }}-windows-x86_64.zip" -Force
+
+      - name: Package Linux & Extension Artifacts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p dist
+          STAGING="fetchtrek-${{ env.RELEASE_TAG }}-linux-x86_64"
+          mkdir -p "$STAGING"
+          cp target/release/fetchtrek-ui "$STAGING/"
+          cp target/release/fetchtrek-daemon "$STAGING/"
+          cp target/release/fetchtrek-cli "$STAGING/"
+          cp target/release/fetchtrek-host "$STAGING/"
+          cp README.md "$STAGING/" 2>/dev/null || true
+          cp LICENSE "$STAGING/" 2>/dev/null || true
+          tar -czvf "dist/fetchtrek-${{ env.RELEASE_TAG }}-linux-x86_64.tar.gz" -C "$STAGING" .
+
+          # Package Chromium extension
+          EXT_ZIP="$(pwd)/dist/fetchtrek-chromium-extension-${{ env.RELEASE_TAG }}.zip"
+          cd extensions/chromium
+          zip -r "$EXT_ZIP" . -x "tests/*"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.artifact_name }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set Release Tag Env
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag_name }}"
+          if [ -z "$TAG" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="v1.0.0"
+          fi
+          echo "RELEASE_TAG=${TAG}" >> $GITHUB_ENV
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate Checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: FetchTrek ${{ env.RELEASE_TAG }}
+          files: dist/*
+          prerelease: ${{ github.event.inputs.is_prerelease || false }}
+          generate_release_notes: true
