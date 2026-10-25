@@ -274,15 +274,12 @@ pub fn register(
     let concrete = target.concrete_targets();
     let mut registered = Vec::with_capacity(concrete.len());
 
-    let manifests_dir = default_manifest_dir();
-
     // Prepare Chromium manifest
     let chromium_origins = match extension_id {
         Some(id) if !id.trim().is_empty() => vec![format!("chrome-extension://{id}/")],
         _ => Vec::new(),
     };
     let chromium_manifest = create_chromium_manifest(host_exe, &chromium_origins);
-    let chromium_manifest_path = manifests_dir.join(format!("{HOST_NAME}.json"));
 
     // Prepare Firefox manifest
     let firefox_extensions = match extension_id {
@@ -290,10 +287,13 @@ pub fn register(
         _ => Vec::new(),
     };
     let firefox_manifest = create_firefox_manifest(host_exe, &firefox_extensions);
-    let firefox_manifest_path = manifests_dir.join(format!("{HOST_NAME}.firefox.json"));
 
     #[cfg(target_os = "windows")]
     {
+        let manifests_dir = default_manifest_dir();
+        let chromium_manifest_path = manifests_dir.join(format!("{HOST_NAME}.json"));
+        let firefox_manifest_path = manifests_dir.join(format!("{HOST_NAME}.firefox.json"));
+
         // Write manifests to centralized FetchTrek app data directory
         let has_chromium = concrete.iter().any(|t| !t.is_firefox());
         let has_firefox = concrete.iter().any(|t| t.is_firefox());

@@ -3,12 +3,19 @@ name: FetchTrek CI
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
 
 jobs:
   validate:
@@ -54,9 +61,6 @@ jobs:
 
       - name: Run Clippy Linter
         run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Cargo Workspace Check
-        run: cargo check --workspace
 
       - name: Run Workspace Tests
         run: cargo test --workspace
