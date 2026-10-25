@@ -24,6 +24,19 @@
     </div>
 
     <main class="popup-body">
+      <div class="control-card media-section" id="mediaCard">
+        <div class="control-row">
+          <div class="control-label">
+            <span class="title">Media Streams on this Tab</span>
+            <span class="desc" id="mediaSectionSubtitle">Passive HLS & DASH Sniffer</span>
+          </div>
+          <span class="counter-badge" id="streamCounter">0</span>
+        </div>
+        <div class="stream-list" id="streamList">
+          <div class="empty-stream-msg" id="emptyStreamMsg">No media streams detected on active tab</div>
+        </div>
+      </div>
+
       <div class="control-card">
         <div class="control-row">
           <div class="control-label">
@@ -32,6 +45,19 @@
           </div>
           <label class="switch">
             <input type="checkbox" id="toggleInterception">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-row">
+          <div class="control-label">
+            <span class="title">Floating Video Button</span>
+            <span class="desc">Show in-page video download grabber</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="toggleFloatingGrabber">
             <span class="slider"></span>
           </label>
         </div>

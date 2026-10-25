@@ -9,10 +9,20 @@
     "storage",
     "notifications",
     "cookies",
-    "tabs"
+    "tabs",
+    "webRequest",
+    "scripting"
   ],
   "host_permissions": [
     "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["grabber.js"],
+      "css": ["grabber.css"],
+      "run_at": "document_idle"
+    }
   ],
   "background": {
     "service_worker": "background.js",

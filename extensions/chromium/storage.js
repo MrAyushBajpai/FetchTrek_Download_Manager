@@ -1,5 +1,6 @@
 export const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
+  floating_grabber_enabled: true,
   min_file_size_bytes: 0,
   blacklist_extensions: [".crx", ".xpi", ".torrent"],
   blacklist_domains: []
