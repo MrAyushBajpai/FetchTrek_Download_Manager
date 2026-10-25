@@ -1,0 +1,274 @@
+import { DesignTokens } from "tokens.slint";
+
+component SidebarItem inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <int> badge_count: -1;
+    in property <color> badge_color: DesignTokens.text-secondary;
+    in property <bool> is_selected: false;
+    callback clicked();
+
+    height: 34px;
+    border-radius: 4px;
+    background: root.is_selected ? DesignTokens.surface-selected :
+                item_touch.has-hover ? DesignTokens.surface-hover : #00000000;
+
+    item_touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    if root.is_selected : Rectangle {
+        x: 0px;
+        y: 4px;
+        width: 2px;
+        height: parent.height - 8px;
+        border-radius: 1px;
+        background: DesignTokens.primary-blue;
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: space-between;
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+
+            Text {
+                text: root.icon;
+                font-size: 13px;
+                color: root.is_selected ? DesignTokens.primary-blue : DesignTokens.text-secondary;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: root.text;
+                font-size: 13px;
+                font-weight: root.is_selected ? 700 : 500;
+                color: root.is_selected ? DesignTokens.text-primary : DesignTokens.text-secondary;
+                vertical-alignment: center;
+            }
+        }
+
+        if root.badge_count >= 0 : VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 26px;
+                height: 18px;
+                border-radius: 9px;
+                background: root.is_selected ? DesignTokens.primary-blue.with-alpha(0.2) : DesignTokens.surface-input;
+
+                Text {
+                    text: root.badge_count;
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: root.is_selected ? DesignTokens.primary-blue : root.badge_color;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    width: 220px;
+    background: DesignTokens.surface-sidebar;
+
+    in-out property <string> selected_category: "All Tasks";
+    in property <int> count_all: 0;
+    in property <int> count_downloading: 0;
+    in property <int> count_paused: 0;
+    in property <int> count_completed: 0;
+    in property <int> count_failed: 0;
+    in property <string> download_speed: "0.0 MB/s";
+    in property <string> upload_speed: "0.0 MB/s";
+
+    callback filter_category_selected(string);
+
+    // Right border hairline divider
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        background: DesignTokens.border-hairline;
+    }
+
+    VerticalLayout {
+        padding-top: 14px;
+        padding-bottom: 12px;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 16px;
+
+        // Status Categories
+        VerticalLayout {
+            spacing: 2px;
+
+            SidebarItem {
+                text: "All Tasks";
+                icon: "📋";
+                badge_count: root.count_all;
+                badge_color: DesignTokens.text-secondary;
+                is_selected: root.selected_category == "All Tasks";
+                clicked => {
+                    root.selected_category = "All Tasks";
+                    root.filter_category_selected("All Tasks");
+                }
+            }
+
+            SidebarItem {
+                text: "Downloading";
+                icon: "⤓";
+                badge_count: root.count_downloading;
+                badge_color: DesignTokens.primary-blue;
+                is_selected: root.selected_category == "Downloading";
+                clicked => {
+                    root.selected_category = "Downloading";
+                    root.filter_category_selected("Downloading");
+                }
+            }
+
+            SidebarItem {
+                text: "Paused";
+                icon: "⏸";
+                badge_count: root.count_paused;
+                badge_color: DesignTokens.status-yellow;
+                is_selected: root.selected_category == "Paused";
+                clicked => {
+                    root.selected_category = "Paused";
+                    root.filter_category_selected("Paused");
+                }
+            }
+
+            SidebarItem {
+                text: "Completed";
+                icon: "✓";
+                badge_count: root.count_completed;
+                badge_color: DesignTokens.status-green;
+                is_selected: root.selected_category == "Completed";
+                clicked => {
+                    root.selected_category = "Completed";
+                    root.filter_category_selected("Completed");
+                }
+            }
+
+            SidebarItem {
+                text: "Failed";
+                icon: "✕";
+                badge_count: root.count_failed;
+                badge_color: DesignTokens.status-red;
+                is_selected: root.selected_category == "Failed";
+                clicked => {
+                    root.selected_category = "Failed";
+                    root.filter_category_selected("Failed");
+                }
+            }
+        }
+
+        // Protocol Categories
+        VerticalLayout {
+            spacing: 2px;
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-bottom: 4px;
+
+                Text {
+                    text: "PROTOCOLS";
+                    font-size: 10px;
+                    font-weight: 700;
+                    letter-spacing: 0.8px;
+                    color: DesignTokens.text-muted;
+                }
+            }
+
+            SidebarItem {
+                text: "Direct HTTP/S";
+                icon: "🌐";
+                is_selected: root.selected_category == "Direct HTTP/S";
+                clicked => {
+                    root.selected_category = "Direct HTTP/S";
+                    root.filter_category_selected("Direct HTTP/S");
+                }
+            }
+
+            SidebarItem {
+                text: "Media Streams";
+                icon: "🎬";
+                is_selected: root.selected_category == "Media Streams";
+                clicked => {
+                    root.selected_category = "Media Streams";
+                    root.filter_category_selected("Media Streams");
+                }
+            }
+
+            SidebarItem {
+                text: "BitTorrent";
+                icon: "🧲";
+                is_selected: root.selected_category == "BitTorrent";
+                clicked => {
+                    root.selected_category = "BitTorrent";
+                    root.filter_category_selected("BitTorrent");
+                }
+            }
+        }
+
+        // Spacer to push bottom bar down
+        Rectangle {}
+
+        // Bottom Bandwidth Bar & Daemon Pill
+        Rectangle {
+            background: DesignTokens.surface-card;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: DesignTokens.border-hairline;
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+
+                Rectangle {
+                    background: DesignTokens.surface-inset;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: DesignTokens.border-hairline;
+                    height: 24px;
+
+                    Text {
+                        text: "▼ " + root.download_speed + "  ▲ " + root.upload_speed;
+                        font-size: 11px;
+                        font-weight: 600;
+                        color: DesignTokens.text-primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: center;
+
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            border-radius: 3px;
+                            background: DesignTokens.status-green;
+                        }
+                    }
+
+                    Text {
+                        text: "Daemon Connected";
+                        font-size: 10px;
+                        font-weight: 600;
+                        color: DesignTokens.status-green;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

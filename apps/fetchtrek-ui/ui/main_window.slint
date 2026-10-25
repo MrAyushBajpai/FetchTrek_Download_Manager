@@ -1,6 +1,11 @@
 import { DesignTokens } from "tokens.slint";
-import { SmoothProgressBar } from "progress_bar.slint";
-import { StatusPill, TaskDisplayStatus } from "status_pill.slint";
+import { HeaderBar } from "header.slint";
+import { Sidebar } from "sidebar.slint";
+import { TaskTable, TaskRowData } from "task_table.slint";
+import { TaskDisplayStatus } from "status_pill.slint";
+
+export { TaskRowData }
+export { TaskDisplayStatus }
 
 export component MainWindow inherits Window {
     title: "FetchTrek Download Manager";
@@ -10,49 +15,73 @@ export component MainWindow inherits Window {
     min-height: 600px;
     background: DesignTokens.surface-void;
 
-    VerticalLayout {
-        alignment: center;
-        spacing: 24px;
-        padding: 40px;
+    in-out property <[TaskRowData]> tasks;
+    in-out property <string> active_category: "All Tasks";
+    in property <int> count_all: 0;
+    in property <int> count_downloading: 0;
+    in property <int> count_paused: 0;
+    in property <int> count_completed: 0;
+    in property <int> count_failed: 0;
+    in property <int> selected_count: 0;
+    in property <string> aggregate_download_speed: "0.0 MB/s";
+    in property <string> aggregate_upload_speed: "0.0 MB/s";
 
-        Text {
-            text: "FetchTrek Presentation Engine";
-            font-size: 20px;
-            font-weight: 700;
-            color: DesignTokens.text-primary;
-            horizontal-alignment: center;
+    callback add_download_clicked();
+    callback resume_all_clicked();
+    callback pause_all_clicked();
+    callback settings_clicked();
+    callback search_query_changed(string);
+    callback filter_category_selected(string);
+    callback row_selected(string);
+    callback row_toggle_pause_resume(string);
+    callback row_open_folder(string);
+    callback row_delete(string);
+    callback batch_resume_clicked();
+    callback batch_pause_clicked();
+    callback batch_delete_clicked();
+    callback deselect_all_clicked();
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // Global Header Bar (52px)
+        HeaderBar {
+            add_download_clicked => { root.add_download_clicked(); }
+            resume_all_clicked => { root.resume_all_clicked(); }
+            pause_all_clicked => { root.pause_all_clicked(); }
+            settings_clicked => { root.settings_clicked(); }
+            search_query_changed(query) => { root.search_query_changed(query); }
         }
 
-        Rectangle {
-            background: DesignTokens.surface-card;
-            border-radius: 8px;
-            border-width: 1px;
-            border-color: DesignTokens.border-hairline;
-            width: 500px;
+        // Main Workstation Body
+        HorizontalLayout {
+            spacing: 0px;
 
-            VerticalLayout {
-                padding: 24px;
-                spacing: 16px;
+            // Navigation Sidebar (220px)
+            Sidebar {
+                selected_category <=> root.active_category;
+                count_all: root.count_all;
+                count_downloading: root.count_downloading;
+                count_paused: root.count_paused;
+                count_completed: root.count_completed;
+                count_failed: root.count_failed;
+                download_speed: root.aggregate_download_speed;
+                upload_speed: root.aggregate_upload_speed;
+                filter_category_selected(cat) => { root.filter_category_selected(cat); }
+            }
 
-                Text {
-                    text: "Design System Primitives Preview";
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: DesignTokens.text-secondary;
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    StatusPill { status: TaskDisplayStatus.Downloading; }
-                    StatusPill { status: TaskDisplayStatus.Queued; }
-                    StatusPill { status: TaskDisplayStatus.Paused; }
-                    StatusPill { status: TaskDisplayStatus.Completed; }
-                    StatusPill { status: TaskDisplayStatus.Failed; }
-                }
-
-                SmoothProgressBar { progress: 0.68; fill-color: DesignTokens.primary-blue; }
-                SmoothProgressBar { progress: 0.35; fill-color: DesignTokens.status-yellow; }
-                SmoothProgressBar { progress: 1.00; fill-color: DesignTokens.status-green; }
+            // Central Task Data Table
+            TaskTable {
+                tasks <=> root.tasks;
+                selected_count: root.selected_count;
+                row_selected(id) => { root.row_selected(id); }
+                row_toggle_pause_resume(id) => { root.row_toggle_pause_resume(id); }
+                row_open_folder(id) => { root.row_open_folder(id); }
+                row_delete(id) => { root.row_delete(id); }
+                batch_resume_clicked => { root.batch_resume_clicked(); }
+                batch_pause_clicked => { root.batch_pause_clicked(); }
+                batch_delete_clicked => { root.batch_delete_clicked(); }
+                deselect_all_clicked => { root.deselect_all_clicked(); }
             }
         }
     }

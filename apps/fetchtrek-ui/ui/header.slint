@@ -1,0 +1,287 @@
+import { DesignTokens } from "tokens.slint";
+
+export component HeaderButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon: "";
+    in property <bool> is-primary: false;
+    callback clicked();
+
+    height: 32px;
+    border-radius: 6px;
+    border-width: root.is-primary ? 0px : 1px;
+    border-color: DesignTokens.border-hairline;
+    background: touch.pressed ? (root.is-primary ? DesignTokens.primary-blue.darker(0.2) : DesignTokens.surface-hover.darker(0.1)) :
+                touch.has-hover ? (root.is-primary ? DesignTokens.primary-blue-hover : DesignTokens.surface-hover) :
+                (root.is-primary ? DesignTokens.primary-blue : DesignTokens.surface-card);
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        alignment: center;
+
+        if root.icon != "" : Text {
+            text: root.icon;
+            font-size: 12px;
+            color: root.is-primary ? #ffffff : DesignTokens.text-primary;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.text;
+            font-size: 12px;
+            font-weight: root.is-primary ? 700 : 600;
+            color: root.is-primary ? #ffffff : DesignTokens.text-primary;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component HeaderBar inherits Rectangle {
+    height: 52px;
+    background: DesignTokens.surface-sidebar;
+
+    in-out property <string> search_text: "";
+    in-out property <bool> is_throttled: false;
+
+    callback add_download_clicked();
+    callback resume_all_clicked();
+    callback pause_all_clicked();
+    callback settings_clicked();
+    callback search_query_changed(string);
+    callback toggle_speed_limiter();
+
+    // Bottom border divider
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: DesignTokens.border-hairline;
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+        alignment: space-between;
+
+        // Branding
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 6px;
+                    background: DesignTokens.primary-blue;
+
+                    Text {
+                        text: "⤓";
+                        font-size: 16px;
+                        font-weight: 800;
+                        color: #ffffff;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "FetchTrek";
+                    font-size: 15px;
+                    font-weight: 700;
+                    color: DesignTokens.text-primary;
+                    vertical-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 48px;
+                    height: 18px;
+                    border-radius: 4px;
+                    background: DesignTokens.surface-inset;
+                    border-width: 1px;
+                    border-color: DesignTokens.border-hairline;
+
+                    Text {
+                        text: "CORE";
+                        font-size: 9px;
+                        font-weight: 700;
+                        letter-spacing: 0.5px;
+                        color: DesignTokens.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Search Well
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 380px;
+                height: 34px;
+                background: DesignTokens.surface-input;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: DesignTokens.border-hairline;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "🔍";
+                        font-size: 11px;
+                        color: DesignTokens.text-muted;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        clip: true;
+
+                        if search_input.text == "" : Text {
+                            text: "Search downloads (Ctrl+F)";
+                            font-size: 12px;
+                            color: DesignTokens.text-muted;
+                            vertical-alignment: center;
+                        }
+
+                        search_input := TextInput {
+                            font-size: 12px;
+                            color: DesignTokens.text-primary;
+                            vertical-alignment: center;
+                            edited => {
+                                root.search_text = self.text;
+                                root.search_query_changed(self.text);
+                            }
+                        }
+                    }
+
+                    if search_input.text != "" : VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 16px;
+                            height: 16px;
+                            border-radius: 8px;
+                            background: DesignTokens.surface-hover;
+
+                            Text {
+                                text: "✕";
+                                font-size: 9px;
+                                color: DesignTokens.text-secondary;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => {
+                                    search_input.text = "";
+                                    root.search_text = "";
+                                    root.search_query_changed("");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Action Toolbar
+        VerticalLayout {
+            alignment: center;
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+
+                HeaderButton {
+                    text: "+ Add URL";
+                    is-primary: true;
+                    clicked => { root.add_download_clicked(); }
+                }
+
+                HeaderButton {
+                    icon: "▶";
+                    text: "Resume All";
+                    clicked => { root.resume_all_clicked(); }
+                }
+
+                HeaderButton {
+                    icon: "⏸";
+                    text: "Pause All";
+                    clicked => { root.pause_all_clicked(); }
+                }
+
+                Rectangle {
+                    height: 32px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: DesignTokens.border-hairline;
+                    background: throttle_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+
+                    throttle_touch := TouchArea {
+                        clicked => {
+                            root.is_throttled = !root.is_throttled;
+                            root.toggle_speed_limiter();
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 6px;
+                        alignment: center;
+
+                        Text {
+                            text: root.is_throttled ? "⏱" : "⚡";
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: root.is_throttled ? "Throttled" : "Full Throttle";
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: root.is_throttled ? DesignTokens.status-amber : DesignTokens.text-primary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: DesignTokens.border-hairline;
+                    background: settings_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+
+                    settings_touch := TouchArea {
+                        clicked => { root.settings_clicked(); }
+                    }
+
+                    Text {
+                        text: "⚙";
+                        font-size: 14px;
+                        color: DesignTokens.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
