@@ -5,10 +5,14 @@ use fetchtrek_types::{ByteRange, MediaError, Protocol};
 use super::resolve_url;
 use super::types::{
     AudioTrack, KeyMetadata, MasterPlaylist, MediaManifest, MediaPlaylist, MediaSegment,
-    MediaVariant,
+    MediaVariant, MAX_MANIFEST_BYTES, MAX_MEDIA_SEGMENTS, MAX_MEDIA_VARIANTS,
 };
 
 pub fn parse_hls(content: &str, base_url: &str) -> Result<MediaManifest, MediaError> {
+    if content.len() > MAX_MANIFEST_BYTES {
+        return Err(MediaError::MalformedManifest);
+    }
+
     let trimmed = content.trim_start().trim_start_matches('\u{FEFF}');
     if !trimmed.starts_with("#EXTM3U") {
         return Err(MediaError::MalformedManifest);
@@ -69,6 +73,9 @@ fn parse_hls_master(content: &str, base_url: &str) -> Result<MediaManifest, Medi
                     codecs,
                     url,
                 });
+                if variants.len() > MAX_MEDIA_VARIANTS {
+                    return Err(MediaError::MalformedManifest);
+                }
             }
         } else if let Some(attr_str) = line.strip_prefix("#EXT-X-MEDIA:") {
             let attrs = parse_hls_attributes(attr_str);
@@ -85,11 +92,17 @@ fn parse_hls_master(content: &str, base_url: &str) -> Result<MediaManifest, Medi
                     language,
                     url,
                 });
+                if audio_tracks.len() > MAX_MEDIA_VARIANTS {
+                    return Err(MediaError::MalformedManifest);
+                }
             }
         }
     }
 
-    if variants.is_empty() {
+    if variants.is_empty()
+        || variants.len() > MAX_MEDIA_VARIANTS
+        || audio_tracks.len() > MAX_MEDIA_VARIANTS
+    {
         return Err(MediaError::MalformedManifest);
     }
 
@@ -169,6 +182,9 @@ fn parse_hls_media(content: &str, base_url: &str) -> Result<MediaManifest, Media
                 pending_duration = Some(d);
             }
         } else if !trimmed.starts_with('#') {
+            if segments.len() >= MAX_MEDIA_SEGMENTS {
+                return Err(MediaError::MalformedManifest);
+            }
             let seg_url = resolve_url(base_url, trimmed);
             let duration_secs = pending_duration.take().unwrap_or(target_duration_secs);
             let byte_range = pending_byterange.take();

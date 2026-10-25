@@ -6,6 +6,7 @@ use fetchtrek_types::{MediaError, Protocol};
 use super::resolve_url;
 use super::types::{
     AudioTrack, MasterPlaylist, MediaManifest, MediaPlaylist, MediaSegment, MediaVariant,
+    MAX_MANIFEST_BYTES, MAX_MEDIA_SEGMENTS, MAX_MEDIA_VARIANTS,
 };
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,9 @@ struct DashModel {
 }
 
 pub fn parse_dash(xml_content: &str, base_url: &str) -> Result<MediaManifest, MediaError> {
+    if xml_content.len() > MAX_MANIFEST_BYTES {
+        return Err(MediaError::MalformedManifest);
+    }
     let model = parse_dash_model(xml_content)?;
 
     // If base_url carries a fragment identifier (e.g. "https://example.com/manifest.mpd#1080p"),
@@ -66,7 +70,7 @@ pub fn parse_dash(xml_content: &str, base_url: &str) -> Result<MediaManifest, Me
             model.presentation_duration.unwrap_or(0.0),
             model.is_live,
             base_url,
-        );
+        )?;
         return Ok(MediaManifest::Media(playlist));
     }
 
@@ -127,7 +131,7 @@ pub fn parse_dash(xml_content: &str, base_url: &str) -> Result<MediaManifest, Me
             model.presentation_duration.unwrap_or(0.0),
             model.is_live,
             base_url,
-        );
+        )?;
         Ok(MediaManifest::Media(playlist))
     } else {
         Err(MediaError::MalformedManifest)
@@ -139,6 +143,9 @@ pub fn parse_dash_media(
     base_url: &str,
     representation_id: Option<&str>,
 ) -> Result<MediaPlaylist, MediaError> {
+    if xml_content.len() > MAX_MANIFEST_BYTES {
+        return Err(MediaError::MalformedManifest);
+    }
     let model = parse_dash_model(xml_content)?;
 
     let target_rep = match representation_id {
@@ -156,15 +163,18 @@ pub fn parse_dash_media(
             .ok_or(MediaError::MalformedManifest)?,
     };
 
-    Ok(expand_representation(
+    expand_representation(
         target_rep,
         model.presentation_duration.unwrap_or(0.0),
         model.is_live,
         base_url,
-    ))
+    )
 }
 
 fn parse_dash_model(xml_content: &str) -> Result<DashModel, MediaError> {
+    if xml_content.len() > MAX_MANIFEST_BYTES {
+        return Err(MediaError::MalformedManifest);
+    }
     let mut reader = Reader::from_str(xml_content);
     reader.config_mut().trim_text(true);
 
@@ -266,6 +276,9 @@ fn parse_dash_model(xml_content: &str) -> Result<DashModel, MediaError> {
                         current_lang.clone(),
                         set_template.clone(),
                     );
+                    if representations.len() >= MAX_MEDIA_VARIANTS {
+                        return Err(MediaError::MalformedManifest);
+                    }
                     representations.push(rep);
                 }
                 _ => {}
@@ -273,6 +286,9 @@ fn parse_dash_model(xml_content: &str) -> Result<DashModel, MediaError> {
             Ok(Event::End(ref e)) => match e.name().as_ref() {
                 b"Representation" => {
                     if let Some(rep) = current_rep.take() {
+                        if representations.len() >= MAX_MEDIA_VARIANTS {
+                            return Err(MediaError::MalformedManifest);
+                        }
                         representations.push(rep);
                     }
                 }
@@ -402,7 +418,7 @@ fn expand_representation(
     total_duration: f64,
     is_live: bool,
     base_url: &str,
-) -> MediaPlaylist {
+) -> Result<MediaPlaylist, MediaError> {
     let timescale = if rep.template.timescale > 0 {
         rep.template.timescale
     } else {
@@ -412,8 +428,12 @@ fn expand_representation(
     let segment_duration_secs = if duration_units > 0 {
         (duration_units as f64) / (timescale as f64)
     } else {
-        2.0
+        0.0
     };
+
+    if segment_duration_secs <= 0.0 || segment_duration_secs.is_nan() {
+        return Err(MediaError::MalformedManifest);
+    }
 
     let target_duration_secs = segment_duration_secs;
     let start_number = if rep.template.start_number > 0 {
@@ -427,6 +447,10 @@ fn expand_representation(
     } else {
         1
     };
+
+    if num_segments > MAX_MEDIA_SEGMENTS as u64 {
+        return Err(MediaError::MalformedManifest);
+    }
 
     let init_segment = rep.template.initialization.as_ref().map(|init_tmpl| {
         let expanded = format_dash_template(init_tmpl, &rep.id, 0);
@@ -468,14 +492,14 @@ fn expand_representation(
         });
     }
 
-    MediaPlaylist {
+    Ok(MediaPlaylist {
         protocol: Protocol::Dash,
         target_duration_secs,
         is_live,
         media_sequence: start_number,
         init_segment,
         segments,
-    }
+    })
 }
 
 pub fn format_dash_template(template: &str, rep_id: &str, number: u64) -> String {

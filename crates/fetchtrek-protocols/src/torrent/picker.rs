@@ -107,6 +107,8 @@ pub struct PiecePicker {
     peer_availability: Vec<usize>,
     in_flight: HashMap<BlockRequest, (Instant, [u8; 20])>,
     active_pieces: HashMap<u32, PieceBuffer>,
+    unassigned_blocks: Vec<u16>,
+    seq_cursor: usize,
 }
 
 impl PiecePicker {
@@ -117,6 +119,26 @@ impl PiecePicker {
         total_length: u64,
         strategy: PickerStrategy,
     ) -> Self {
+        let mut unassigned_blocks = Vec::with_capacity(num_pieces);
+        for p in 0..num_pieces as u32 {
+            let p_len = if (p as u64) + 1 == num_pieces as u64 {
+                let remainder = total_length % (piece_length as u64);
+                if remainder == 0 && total_length > 0 {
+                    piece_length
+                } else {
+                    remainder as u32
+                }
+            } else {
+                piece_length
+            };
+            let blocks = if p_len == 0 {
+                0
+            } else {
+                p_len.div_ceil(STANDARD_BLOCK_SIZE)
+            };
+            unassigned_blocks.push(blocks as u16);
+        }
+
         Self {
             num_pieces,
             piece_length,
@@ -126,6 +148,8 @@ impl PiecePicker {
             peer_availability: vec![0; num_pieces],
             in_flight: HashMap::new(),
             active_pieces: HashMap::new(),
+            unassigned_blocks,
+            seq_cursor: 0,
         }
     }
 
@@ -213,60 +237,113 @@ impl PiecePicker {
         requests
     }
 
+    /// Checks whether a piece has at least one unassigned block.
+    #[inline]
+    pub fn has_unassigned_block(&self, piece_index: u32) -> bool {
+        let idx = piece_index as usize;
+        if idx >= self.num_pieces || self.completed[idx] {
+            return false;
+        }
+        self.unassigned_blocks[idx] > 0
+    }
+
+    #[inline]
+    fn try_pick_block_from_piece(&mut self, p: u32, peer_id: &[u8; 20]) -> Option<BlockRequest> {
+        let piece_len = self.piece_size(p);
+        if piece_len == 0 {
+            return None;
+        }
+        let num_blocks = piece_len.div_ceil(STANDARD_BLOCK_SIZE);
+
+        for block_idx in 0..num_blocks {
+            let offset = block_idx * STANDARD_BLOCK_SIZE;
+            let len = (piece_len - offset).min(STANDARD_BLOCK_SIZE);
+
+            // Skip if already received in active piece buffer
+            if let Some(buf) = self.active_pieces.get(&p) {
+                let idx = block_idx as usize;
+                if idx < buf.blocks_received.len() && buf.blocks_received[idx] {
+                    continue;
+                }
+            }
+
+            let req = BlockRequest {
+                piece_index: p,
+                block_offset: offset,
+                block_length: len,
+            };
+
+            // Skip if currently in-flight
+            if self.in_flight.contains_key(&req) {
+                continue;
+            }
+
+            // Dispatch block
+            self.in_flight.insert(req, (Instant::now(), *peer_id));
+            let idx = p as usize;
+            if idx < self.num_pieces {
+                self.unassigned_blocks[idx] = self.unassigned_blocks[idx].saturating_sub(1);
+            }
+            return Some(req);
+        }
+
+        None
+    }
+
     /// Selects the next block to request from a peer according to the configured picking strategy.
+    /// Operates without per-request heap vector allocations during the hot path (FT-QA-014).
     pub fn pick_block(
         &mut self,
         peer_id: &[u8; 20],
         peer_has_piece: impl Fn(u32) -> bool,
     ) -> Option<BlockRequest> {
-        let mut candidate_pieces: Vec<u32> = (0..self.num_pieces as u32)
-            .filter(|&i| !self.completed[i as usize] && peer_has_piece(i))
-            .collect();
-
-        if candidate_pieces.is_empty() {
-            return None;
-        }
-
         match self.strategy {
             PickerStrategy::Sequential => {
-                candidate_pieces.sort_unstable();
+                while self.seq_cursor < self.num_pieces
+                    && (self.completed[self.seq_cursor]
+                        || self.unassigned_blocks[self.seq_cursor] == 0)
+                {
+                    self.seq_cursor += 1;
+                }
+
+                for p in (self.seq_cursor as u32)..(self.num_pieces as u32) {
+                    let idx = p as usize;
+                    if self.completed[idx] || self.unassigned_blocks[idx] == 0 || !peer_has_piece(p)
+                    {
+                        continue;
+                    }
+                    if let Some(req) = self.try_pick_block_from_piece(p, peer_id) {
+                        return Some(req);
+                    }
+                }
+                None
             }
             PickerStrategy::RarestFirst => {
-                candidate_pieces.sort_by_key(|&i| {
-                    let avail = self.peer_availability[i as usize];
-                    let rank = if avail > 0 { 0 } else { 1 };
-                    (rank, avail, i)
-                });
-            }
-        }
+                let mut best_piece = None;
+                let mut best_key = (2usize, usize::MAX, u32::MAX);
 
-        for p in candidate_pieces {
-            let blocks = self.blocks_for_piece(p);
-            for req in blocks {
-                // Skip if already received in active piece buffer
-                if let Some(buf) = self.active_pieces.get(&p) {
-                    let block_idx = (req.block_offset / STANDARD_BLOCK_SIZE) as usize;
-                    if block_idx < buf.blocks_received.len() && buf.blocks_received[block_idx] {
+                for p in 0..self.num_pieces as u32 {
+                    let idx = p as usize;
+                    if self.completed[idx] || self.unassigned_blocks[idx] == 0 || !peer_has_piece(p)
+                    {
                         continue;
+                    }
+                    let avail = self.peer_availability[idx];
+                    let rank = if avail > 0 { 0 } else { 1 };
+                    let key = (rank, avail, p);
+                    if key < best_key {
+                        best_key = key;
+                        best_piece = Some(p);
                     }
                 }
 
-                // Skip if currently in-flight
-                if self.in_flight.contains_key(&req) {
-                    continue;
+                if let Some(p) = best_piece {
+                    self.try_pick_block_from_piece(p, peer_id)
+                } else {
+                    None
                 }
-
-                // Dispatch block
-                self.in_flight.insert(req, (Instant::now(), *peer_id));
-                let p_size = self.piece_size(p);
-                self.active_pieces
-                    .entry(p)
-                    .or_insert_with(|| PieceBuffer::new(p_size));
-                return Some(req);
             }
         }
-
-        None
     }
 
     /// Ingests a received block into the active piece buffer. If all blocks for the piece
@@ -347,9 +424,29 @@ impl PiecePicker {
         let idx = piece_index as usize;
         if idx < self.num_pieces {
             self.completed[idx] = true;
+            self.unassigned_blocks[idx] = 0;
             self.active_pieces.remove(&piece_index);
             self.in_flight
                 .retain(|req, _| req.piece_index != piece_index);
+        }
+    }
+
+    /// Resets a piece so that all its blocks can be re-requested after integrity verification failure.
+    pub fn reject_piece(&mut self, piece_index: u32) {
+        let idx = piece_index as usize;
+        if idx < self.num_pieces {
+            self.completed[idx] = false;
+            self.active_pieces.remove(&piece_index);
+            self.in_flight
+                .retain(|req, _| req.piece_index != piece_index);
+            let size = self.piece_size(piece_index);
+            let blocks = if size == 0 {
+                0
+            } else {
+                size.div_ceil(STANDARD_BLOCK_SIZE)
+            };
+            self.unassigned_blocks[idx] = blocks as u16;
+            self.seq_cursor = self.seq_cursor.min(idx);
         }
     }
 
@@ -392,6 +489,11 @@ impl PiecePicker {
 
         for req in &timed_out {
             self.in_flight.remove(req);
+            let idx = req.piece_index as usize;
+            if idx < self.num_pieces {
+                self.unassigned_blocks[idx] = self.unassigned_blocks[idx].saturating_add(1);
+                self.seq_cursor = self.seq_cursor.min(idx);
+            }
         }
 
         timed_out.len()
@@ -409,6 +511,11 @@ impl PiecePicker {
 
         for req in &cancelled {
             self.in_flight.remove(req);
+            let idx = req.piece_index as usize;
+            if idx < self.num_pieces {
+                self.unassigned_blocks[idx] = self.unassigned_blocks[idx].saturating_add(1);
+                self.seq_cursor = self.seq_cursor.min(idx);
+            }
         }
 
         cancelled.len()

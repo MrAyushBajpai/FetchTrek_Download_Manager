@@ -263,30 +263,24 @@ impl MediaIngestionCoordinator {
             }
 
             // Backpressure check
-            while self.memory_pool.is_under_backpressure() {
-                tokio::select! {
-                    _ = cancel_rx.changed() => {
-                        if *cancel_rx.borrow() {
-                            return Err(FetchTrekError::Network(NetworkError::ConnectionReset));
-                        }
+            tokio::select! {
+                _ = cancel_rx.changed() => {
+                    if *cancel_rx.borrow() {
+                        return Err(FetchTrekError::Network(NetworkError::ConnectionReset));
                     }
-                    _ = tokio::time::sleep(Duration::from_millis(1)) => {}
                 }
+                _ = self.memory_pool.wait_for_backpressure_relief() => {}
             }
 
             // Acquire slab
-            let mut slab = loop {
-                if let Some(s) = self.memory_pool.acquire() {
-                    break s;
-                }
-                tokio::select! {
-                    _ = cancel_rx.changed() => {
-                        if *cancel_rx.borrow() {
-                            return Err(FetchTrekError::Network(NetworkError::ConnectionReset));
-                        }
+            let mut slab = tokio::select! {
+                _ = cancel_rx.changed() => {
+                    if *cancel_rx.borrow() {
+                        return Err(FetchTrekError::Network(NetworkError::ConnectionReset));
                     }
-                    _ = tokio::time::sleep(Duration::from_millis(1)) => {}
+                    continue;
                 }
+                s = self.memory_pool.acquire_async() => s,
             };
 
             let buf = slab.as_mut_slice();

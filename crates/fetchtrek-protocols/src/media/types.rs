@@ -1,5 +1,12 @@
 use fetchtrek_types::{ByteRange, Protocol};
 
+/// Security threshold preventing memory exhaustion from oversized playlists (FT-QA-016).
+pub const MAX_MANIFEST_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+/// Security ceiling on total media segments parsed from a single playlist representation.
+pub const MAX_MEDIA_SEGMENTS: usize = 50_000;
+/// Security ceiling on audio/video stream variants parsed from a master manifest.
+pub const MAX_MEDIA_VARIANTS: usize = 1_000;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum MediaManifest {
     Master(MasterPlaylist),

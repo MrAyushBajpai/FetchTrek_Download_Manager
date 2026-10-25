@@ -161,3 +161,71 @@ fn test_concurrent_multi_threaded_stress() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_async_slab_acquisition_and_backpressure_relief() {
+    let pool = SlabPool::new();
+
+    // 1. Drain pool down to 51 slabs so is_under_backpressure() is true
+    let mut leases: Vec<LeasedSlab> = Vec::with_capacity(TOTAL_SLABS);
+    for _ in 0..(TOTAL_SLABS - 51) {
+        leases.push(pool.acquire().unwrap());
+    }
+    assert_eq!(pool.available_slabs(), 51);
+    assert!(pool.is_under_backpressure());
+
+    // 2. Spawn a task that waits for backpressure relief
+    let pool_clone = Arc::clone(&pool);
+    let relieved_flag = Arc::new(AtomicBool::new(false));
+    let relieved_flag_clone = Arc::clone(&relieved_flag);
+
+    let wait_handle = tokio::spawn(async move {
+        pool_clone.wait_for_backpressure_relief().await;
+        relieved_flag_clone.store(true, Ordering::SeqCst);
+    });
+
+    // Verify task is still waiting because pool is under backpressure
+    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    assert!(!relieved_flag.load(Ordering::SeqCst));
+
+    // Release 1 slab: available becomes 52 (> 51), relieving backpressure
+    let freed = leases.pop().unwrap();
+    drop(freed);
+    assert_eq!(pool.available_slabs(), 52);
+    assert!(!pool.is_under_backpressure());
+
+    // Task must wake immediately via Notify with zero polling delay
+    tokio::time::timeout(tokio::time::Duration::from_millis(50), wait_handle)
+        .await
+        .expect("wait_for_backpressure_relief must complete promptly")
+        .expect("join handle");
+    assert!(relieved_flag.load(Ordering::SeqCst));
+
+    // 3. Test acquire_async when pool is completely exhausted
+    while let Some(l) = pool.acquire() {
+        leases.push(l);
+    }
+    assert_eq!(pool.available_slabs(), 0);
+
+    let pool_clone2 = Arc::clone(&pool);
+    let acquired_index = Arc::new(std::sync::atomic::AtomicUsize::new(usize::MAX));
+    let acquired_index_clone = Arc::clone(&acquired_index);
+
+    let acquire_handle = tokio::spawn(async move {
+        let slab = pool_clone2.acquire_async().await;
+        acquired_index_clone.store(slab.index, Ordering::SeqCst);
+    });
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    assert_eq!(acquired_index.load(Ordering::SeqCst), usize::MAX);
+
+    // Release 1 slab
+    let freed_index = leases.pop().unwrap().index;
+    // Dropping wakes the async waiter
+    tokio::time::timeout(tokio::time::Duration::from_millis(50), acquire_handle)
+        .await
+        .expect("acquire_async must complete promptly upon slab release")
+        .expect("join handle");
+
+    assert_eq!(acquired_index.load(Ordering::SeqCst), freed_index);
+}

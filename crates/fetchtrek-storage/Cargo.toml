@@ -7,7 +7,7 @@ edition = "2021"
 fetchtrek-types = { path = "../fetchtrek-types" }
 crossbeam-queue = "0.3"
 async-trait = "0.1"
-tokio = { version = "1", features = ["fs", "rt", "sync", "macros"] }
+tokio = { version = "1", features = ["fs", "rt", "sync", "macros", "time"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

@@ -322,16 +322,8 @@ impl DownloadCoordinator {
                         let remaining = cur_limit - cur_pos + 1;
                         let max_read = (remaining as usize).min(SLAB_SIZE);
 
-                        while slab_pool.is_under_backpressure() {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-                        }
-
-                        let mut slab = loop {
-                            if let Some(s) = slab_pool.acquire() {
-                                break s;
-                            }
-                            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-                        };
+                        slab_pool.wait_for_backpressure_relief().await;
+                        let mut slab = slab_pool.acquire_async().await;
 
                         let buf = slab.as_mut_slice();
                         let n = match stream.read(&mut buf[..max_read]).await {

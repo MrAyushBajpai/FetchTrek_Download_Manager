@@ -343,6 +343,8 @@ pub fn start_torrent_download(
                                                     }
                                                     Ok(false) => {
                                                         // Corrupt piece rejected; block buffer discarded for re-request
+                                                        let mut p_guard = picker_clone.lock().await;
+                                                        p_guard.reject_piece(index);
                                                     }
                                                     Err(_) => {}
                                                 }

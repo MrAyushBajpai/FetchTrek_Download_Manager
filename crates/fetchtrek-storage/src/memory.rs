@@ -25,6 +25,7 @@ impl fmt::Debug for SlabBuffer {
 pub struct SlabPool {
     storage: Box<[UnsafeCell<SlabBuffer>; TOTAL_SLABS]>,
     free_indices: ArrayQueue<usize>,
+    available_notify: tokio::sync::Notify,
 }
 
 // SAFETY: SlabPool manages thread-safe handoff of slab indices via an ArrayQueue.
@@ -51,6 +52,7 @@ impl SlabPool {
         Arc::new(Self {
             storage,
             free_indices,
+            available_notify: tokio::sync::Notify::new(),
         })
     }
 
@@ -60,6 +62,29 @@ impl SlabPool {
             index,
             valid_bytes: 0,
         })
+    }
+
+    pub async fn acquire_async(self: &Arc<Self>) -> LeasedSlab {
+        loop {
+            if let Some(slab) = self.acquire() {
+                return slab;
+            }
+            let notified = self.available_notify.notified();
+            if let Some(slab) = self.acquire() {
+                return slab;
+            }
+            notified.await;
+        }
+    }
+
+    pub async fn wait_for_backpressure_relief(self: &Arc<Self>) {
+        while self.is_under_backpressure() {
+            let notified = self.available_notify.notified();
+            if !self.is_under_backpressure() {
+                break;
+            }
+            notified.await;
+        }
     }
 
     pub fn available_slabs(&self) -> usize {
@@ -113,6 +138,7 @@ impl LeasedSlab {
 impl Drop for LeasedSlab {
     fn drop(&mut self) {
         let _ = self.pool.free_indices.push(self.index);
+        self.pool.available_notify.notify_waiters();
     }
 }
 

@@ -43,7 +43,12 @@ impl AsyncStorage for PositionalStorage {
         destination: &Path,
         total_bytes: u64,
     ) -> Result<(), StorageError> {
-        crate::sparse::allocate_sparse(destination, total_bytes).map(|_| ())
+        let dest = destination.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            crate::sparse::allocate_sparse(&dest, total_bytes).map(|_| ())
+        })
+        .await
+        .map_err(|_| StorageError::IoFailure)?
     }
 
     async fn write_positional(

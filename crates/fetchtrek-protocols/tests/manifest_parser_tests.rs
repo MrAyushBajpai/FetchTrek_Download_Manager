@@ -439,3 +439,73 @@ fn test_url_resolution_corner_cases() {
         "https://cdn.example.com/live/1080p/index.m3u8?token=abc#720p"
     );
 }
+
+#[test]
+fn test_bounded_manifest_anti_dos() {
+    let base_url = "https://cdn.example.com/stream.m3u8";
+
+    // 1. Oversized manifest content (> 10 MiB)
+    let huge_content = format!("#EXTM3U\n{}", " ".repeat(10 * 1024 * 1024 + 1));
+    assert_eq!(
+        parse_hls(&huge_content, base_url),
+        Err(MediaError::MalformedManifest)
+    );
+    assert_eq!(
+        parse_dash(&huge_content, "https://cdn.example.com/stream.mpd"),
+        Err(MediaError::MalformedManifest)
+    );
+
+    // 2. HLS Master with > 1,000 variants
+    let mut master_overflow = String::from("#EXTM3U\n");
+    for i in 0..1005 {
+        master_overflow.push_str(&format!(
+            "#EXT-X-STREAM-INF:BANDWIDTH={}\nvariant_{}.m3u8\n",
+            i * 1000,
+            i
+        ));
+    }
+    assert_eq!(
+        parse_hls(&master_overflow, base_url),
+        Err(MediaError::MalformedManifest)
+    );
+
+    // 3. HLS Media with >= 50,000 segments
+    let mut media_overflow = String::from("#EXTM3U\n#EXT-X-TARGETDURATION:10\n");
+    for i in 0..50005 {
+        media_overflow.push_str(&format!("#EXTINF:10.0,\nseg_{}.ts\n", i));
+    }
+    assert_eq!(
+        parse_hls(&media_overflow, base_url),
+        Err(MediaError::MalformedManifest)
+    );
+
+    // 4. DASH MPD with > 50,000 calculated segments (e.g. 100,000 seconds / 1 second duration)
+    let dash_segment_overflow = r#"<?xml version="1.0" encoding="utf-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" mediaPresentationDuration="PT100000S">
+  <Period>
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="1" duration="1" media="chunk_$Number$.m4s"/>
+      <Representation id="1080p" bandwidth="5000000" width="1920" height="1080"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+    assert_eq!(
+        parse_dash(dash_segment_overflow, "https://cdn.example.com/stream.mpd"),
+        Err(MediaError::MalformedManifest)
+    );
+
+    // 5. DASH MPD with non-positive segment duration
+    let dash_zero_duration = r#"<?xml version="1.0" encoding="utf-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" mediaPresentationDuration="PT100S">
+  <Period>
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="0" duration="0" media="chunk_$Number$.m4s"/>
+      <Representation id="1080p" bandwidth="5000000" width="1920" height="1080"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+    assert_eq!(
+        parse_dash(dash_zero_duration, "https://cdn.example.com/stream.mpd"),
+        Err(MediaError::MalformedManifest)
+    );
+}

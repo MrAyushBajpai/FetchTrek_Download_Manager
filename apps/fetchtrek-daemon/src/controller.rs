@@ -680,21 +680,23 @@ impl TaskController {
                             let remaining = cur_limit - cur_pos + 1;
                             let max_read = (remaining as usize).min(SLAB_SIZE);
 
-                            while slab_pool.is_under_backpressure() {
-                                if *cancel_rx_worker.borrow() {
-                                    return Ok(());
+                            tokio::select! {
+                                _ = cancel_rx_worker.changed() => {
+                                    if *cancel_rx_worker.borrow() {
+                                        return Ok(());
+                                    }
                                 }
-                                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                                _ = slab_pool.wait_for_backpressure_relief() => {}
                             }
 
-                            let mut slab = loop {
-                                if *cancel_rx_worker.borrow() {
-                                    return Ok(());
+                            let mut slab = tokio::select! {
+                                _ = cancel_rx_worker.changed() => {
+                                    if *cancel_rx_worker.borrow() {
+                                        return Ok(());
+                                    }
+                                    continue;
                                 }
-                                if let Some(s) = slab_pool.acquire() {
-                                    break s;
-                                }
-                                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                                s = slab_pool.acquire_async() => s,
                             };
 
                             let buf = slab.as_mut_slice();
