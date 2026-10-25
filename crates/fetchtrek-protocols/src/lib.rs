@@ -14,3 +14,12 @@ pub use media::{
     resolve_url, AssemblyConfig, AssemblySummary, AudioTrack, KeyMetadata, MasterPlaylist,
     MediaManifest, MediaPlaylist, MediaSegment, MediaVariant, StreamContainer,
 };
+
+#[cfg(feature = "torrent")]
+pub mod torrent;
+
+#[cfg(feature = "torrent")]
+pub use torrent::{
+    decode_base32, extract_raw_dict_value, sha1, to_base32, BencodeValue, MagnetLink, Sha1,
+    TorrentError, TorrentFile, TorrentMeta,
+};

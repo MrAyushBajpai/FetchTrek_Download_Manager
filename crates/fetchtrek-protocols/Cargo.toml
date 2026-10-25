@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["http", "media"]
+default = ["http", "media", "torrent"]
 http = ["dep:reqwest", "dep:tokio-util", "dep:futures-util"]
 media = ["http", "dep:quick-xml", "dep:aes", "dep:cbc"]
+torrent = []
 
 [dependencies]
 fetchtrek-types = { path = "../fetchtrek-types" }
 fetchtrek-core = { path = "../fetchtrek-core" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "macros"] }
+thiserror = "1.0"
 
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
