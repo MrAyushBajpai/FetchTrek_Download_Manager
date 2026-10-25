@@ -46,7 +46,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libx11-dev \
             libxcursor-dev libxext-dev libxft-dev libxi-dev libxinerama-dev \
-            libxrandr-dev libxrender-dev libsecret-1-dev
+            libxrandr-dev libxrender-dev libsecret-1-dev xvfb
 
       - name: Install Rust Stable Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -62,5 +62,10 @@ jobs:
       - name: Run Clippy Linter
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Run Workspace Tests
+      - name: Run Workspace Tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum cargo test --workspace
+
+      - name: Run Workspace Tests (Windows)
+        if: runner.os == 'Windows'
         run: cargo test --workspace
