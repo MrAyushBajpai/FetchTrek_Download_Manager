@@ -130,7 +130,11 @@ async fn main() {
 async fn run_stdio_loop() {
     let mut stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
-    let mut relay = HostRelay::default_endpoint();
+    let relay_endpoint = std::env::var("FETCHTREK_IPC_ENDPOINT").ok();
+    let mut relay = match relay_endpoint {
+        Some(ep) => HostRelay::new(ep),
+        None => HostRelay::default_endpoint(),
+    };
 
     loop {
         match read_native_message(&mut stdin).await {

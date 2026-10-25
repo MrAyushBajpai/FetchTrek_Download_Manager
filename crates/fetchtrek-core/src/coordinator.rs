@@ -249,6 +249,8 @@ impl DownloadCoordinator {
                         .open_range_stream(&url, stream_range, &context)
                         .await
                         .map_err(FetchTrekError::Network)?;
+                    let mut bytes_read_from_stream: u64 = 0;
+                    let expected_stream_len = stream_range.len();
 
                     loop {
                         let cur_pos = cursor.current_cursor.load(Ordering::Acquire);
@@ -275,14 +277,24 @@ impl DownloadCoordinator {
                         let buf = slab.as_mut_slice();
                         let n = match stream.read(&mut buf[..max_read]).await {
                             Ok(0) => {
-                                if cur_pos <= cur_limit {
+                                if bytes_read_from_stream < expected_stream_len
+                                    && cur_pos <= cur_limit
+                                {
                                     return Err(FetchTrekError::Network(
                                         NetworkError::ConnectionReset,
                                     ));
                                 }
                                 break;
                             }
-                            Ok(n) => n,
+                            Ok(n) => {
+                                bytes_read_from_stream += n as u64;
+                                if bytes_read_from_stream > expected_stream_len {
+                                    return Err(FetchTrekError::Network(
+                                        NetworkError::ProtocolError,
+                                    ));
+                                }
+                                n
+                            }
                             Err(_) => {
                                 return Err(FetchTrekError::Network(NetworkError::SocketTimeout));
                             }

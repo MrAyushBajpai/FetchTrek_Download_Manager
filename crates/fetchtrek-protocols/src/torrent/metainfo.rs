@@ -56,9 +56,20 @@ pub struct TorrentMeta {
 }
 
 impl TorrentMeta {
+    pub const MAX_METADATA_SIZE: usize = 10 * 1024 * 1024; // 10 MiB resource budget
+    pub const MAX_FILES_COUNT: usize = 100_000; // 100,000 files resource budget
+    pub const MAX_PIECES_COUNT: usize = 500_000; // 500,000 pieces resource budget
+
     /// Parses a `.torrent` file byte slice into `TorrentMeta`.
     /// Computes `info_hash` directly from the raw byte slice of the `info` dictionary.
     pub fn from_bytes(data: &[u8]) -> Result<Self, TorrentError> {
+        if data.len() > Self::MAX_METADATA_SIZE {
+            return Err(TorrentError::InvalidMetainfo(format!(
+                "Torrent metainfo size exceeds 10 MiB resource limit: {} bytes",
+                data.len()
+            )));
+        }
+
         let root = BencodeValue::decode(data)?;
         let root_dict = root.as_dict().ok_or_else(|| {
             TorrentError::InvalidMetainfo("Torrent metainfo root must be a dictionary".into())
@@ -100,7 +111,11 @@ impl TorrentMeta {
                 "'piece length' must be a positive integer".into(),
             ));
         }
-        let piece_length = piece_length_int as u32;
+        let piece_length = u32::try_from(piece_length_int).map_err(|_| {
+            TorrentError::InvalidMetainfo(format!(
+                "'piece length' exceeds u32::MAX: {piece_length_int}"
+            ))
+        })?;
 
         // 5. Pieces byte string (exact multiple of 20)
         let pieces_raw = info
@@ -116,6 +131,12 @@ impl TorrentMeta {
         }
 
         let pieces: Vec<[u8; 20]> = pieces_raw.as_chunks::<20>().0.to_vec();
+        if pieces.len() > Self::MAX_PIECES_COUNT {
+            return Err(TorrentError::InvalidMetainfo(format!(
+                "Piece count exceeds maximum budget of 500,000: {}",
+                pieces.len()
+            )));
+        }
 
         // 6. Private flag
         let is_private = info
@@ -150,6 +171,12 @@ impl TorrentMeta {
                 return Err(TorrentError::InvalidMetainfo(
                     "Multi-file 'files' list cannot be empty".into(),
                 ));
+            }
+            if files_list.len() > Self::MAX_FILES_COUNT {
+                return Err(TorrentError::InvalidMetainfo(format!(
+                    "File count exceeds maximum budget of 100,000: {}",
+                    files_list.len()
+                )));
             }
 
             let mut files = Vec::with_capacity(files_list.len());
@@ -216,6 +243,19 @@ impl TorrentMeta {
                 "Info dictionary must contain either 'length' or 'files'".into(),
             ));
         };
+
+        // Piece arithmetic consistency check (FT-QA-003)
+        let expected_pieces = if total_length == 0 {
+            0
+        } else {
+            total_length.div_ceil(piece_length as u64)
+        };
+        if pieces.len() as u64 != expected_pieces {
+            return Err(TorrentError::InvalidMetainfo(format!(
+                "Mismatched piece count: calculated {expected_pieces} pieces for total length {total_length} and piece length {piece_length}, but got {} piece hashes",
+                pieces.len()
+            )));
+        }
 
         // 8. Trackers: announce & announce-list (BEP 0012)
         let announce = root_dict

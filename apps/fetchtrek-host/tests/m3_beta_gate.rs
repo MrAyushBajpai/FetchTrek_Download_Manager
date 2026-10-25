@@ -397,6 +397,7 @@ async fn test_milestone_m3_beta_exit_gate() {
             action,
             task_id,
             uuid,
+            ..
         } => {
             assert_eq!(status, "ok");
             assert_eq!(action, "task_created");

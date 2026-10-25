@@ -56,12 +56,12 @@ impl PieceBuffer {
     /// Ingests a block payload into the piece buffer at the specified byte offset.
     pub fn insert_block(&mut self, block_offset: u32, block: &[u8]) -> Result<bool, TorrentError> {
         let offset = block_offset as usize;
-        let end = offset + block.len();
+        let piece_size = self.data.len();
 
-        if end > self.data.len() {
+        // 1. Validate block alignment to 16 KiB boundary (FT-QA-005)
+        if !block_offset.is_multiple_of(STANDARD_BLOCK_SIZE) {
             return Err(TorrentError::ProtocolError(format!(
-                "Block bounds [{offset}, {end}) exceed piece capacity of {} bytes",
-                self.data.len()
+                "Block offset {block_offset} is not aligned to 16 KiB boundary"
             )));
         }
 
@@ -73,15 +73,27 @@ impl PieceBuffer {
             )));
         }
 
-        self.data[offset..end].copy_from_slice(block);
-
-        if !self.blocks_received[block_idx] {
-            self.blocks_received[block_idx] = true;
-            self.remaining_blocks = self.remaining_blocks.saturating_sub(1);
-            Ok(true)
-        } else {
-            Ok(false)
+        // 2. Validate expected block length (standard 16 KiB, or terminal piece remainder)
+        let expected_len = (piece_size - offset).min(STANDARD_BLOCK_SIZE as usize);
+        if block.len() != expected_len {
+            return Err(TorrentError::ProtocolError(format!(
+                "Block length {} at offset {block_offset} does not match expected length {expected_len}",
+                block.len()
+            )));
         }
+
+        // 3. Reject duplicate or overlapping block writes
+        if self.blocks_received[block_idx] {
+            return Err(TorrentError::ProtocolError(format!(
+                "Duplicate or overlapping block write at index {block_idx} / offset {block_offset}"
+            )));
+        }
+
+        let end = offset + block.len();
+        self.data[offset..end].copy_from_slice(block);
+        self.blocks_received[block_idx] = true;
+        self.remaining_blocks = self.remaining_blocks.saturating_sub(1);
+        Ok(true)
     }
 }
 
@@ -265,6 +277,17 @@ impl PiecePicker {
         begin: u32,
         block: &[u8],
     ) -> Result<Option<Vec<u8>>, TorrentError> {
+        self.ingest_block_from_peer(index, begin, block, None)
+    }
+
+    /// Ingests a received block while verifying in-flight tracking and peer attribution (FT-QA-005).
+    pub fn ingest_block_from_peer(
+        &mut self,
+        index: u32,
+        begin: u32,
+        block: &[u8],
+        peer_id: Option<&[u8; 20]>,
+    ) -> Result<Option<Vec<u8>>, TorrentError> {
         let idx = index as usize;
         if idx >= self.num_pieces {
             return Err(TorrentError::ProtocolError(format!(
@@ -278,9 +301,27 @@ impl PiecePicker {
             block_offset: begin,
             block_length: block.len() as u32,
         };
-        self.in_flight.remove(&req);
+
+        // Validate in-flight request and peer attribution for peer wire network blocks (FT-QA-005)
+        if let Some(actual_peer) = peer_id {
+            match self.in_flight.get(&req) {
+                None => {
+                    return Err(TorrentError::ProtocolError(format!(
+                        "Unsolicited block received: no in-flight request for piece {index}, offset {begin}, length {}",
+                        block.len()
+                    )));
+                }
+                Some((_, requested_peer)) if requested_peer != actual_peer => {
+                    return Err(TorrentError::ProtocolError(format!(
+                        "Unsolicited block: peer mismatch for piece {index}, offset {begin} (requested from {requested_peer:?}, received from {actual_peer:?})"
+                    )));
+                }
+                _ => {}
+            }
+        }
 
         if self.completed[idx] {
+            self.in_flight.remove(&req);
             return Ok(None);
         }
 
@@ -291,6 +332,7 @@ impl PiecePicker {
             .or_insert_with(|| PieceBuffer::new(p_size));
 
         buffer.insert_block(begin, block)?;
+        self.in_flight.remove(&req);
 
         if buffer.is_complete() {
             let completed_buf = self.active_pieces.remove(&index).expect("active piece");
@@ -324,6 +366,11 @@ impl PiecePicker {
     /// Returns `true` if all pieces in the torrent have been verified and completed.
     pub fn is_all_completed(&self) -> bool {
         self.completed.iter().all(|&c| c)
+    }
+
+    /// Returns the number of currently active in-memory piece buffers.
+    pub fn active_buffers(&self) -> usize {
+        self.active_pieces.len()
     }
 
     /// Number of verified completed pieces.

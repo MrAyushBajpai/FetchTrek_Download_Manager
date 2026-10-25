@@ -19,6 +19,8 @@ pub struct SessionContext {
     pub cookies: Option<String>,
     pub user_agent: Option<String>,
     pub referer: Option<String>,
+    pub etag: Option<String>,
+    pub expected_total_bytes: Option<u64>,
 }
 
 impl SessionContext {
@@ -38,6 +40,16 @@ impl SessionContext {
 
     pub fn with_cookies(mut self, cookies: impl Into<String>) -> Self {
         self.cookies = Some(cookies.into());
+        self
+    }
+
+    pub fn with_etag(mut self, etag: impl Into<String>) -> Self {
+        self.etag = Some(etag.into());
+        self
+    }
+
+    pub fn with_expected_total_bytes(mut self, bytes: u64) -> Self {
+        self.expected_total_bytes = Some(bytes);
         self
     }
 

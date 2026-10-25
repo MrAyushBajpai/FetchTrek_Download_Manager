@@ -159,7 +159,7 @@ async fn test_host_response_serialization() {
     let json = serde_json::to_string(&created).unwrap();
     assert_eq!(
         json,
-        r#"{"status":"ok","action":"task_created","task_id":1,"uuid":"uuid-1234"}"#
+        r#"{"status":"ok","action":"task_created","success":true,"task_id":1,"uuid":"uuid-1234"}"#
     );
 
     // 3. TaskUpdated

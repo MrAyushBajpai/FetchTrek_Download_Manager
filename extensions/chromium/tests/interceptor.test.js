@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { shouldIntercept, extractDownloadMetadata } from "../interceptor.js";
+import { shouldIntercept, extractDownloadMetadata, handleDownloadCreated } from "../interceptor.js";
 import { DEFAULT_SETTINGS } from "../storage.js";
 
 test("shouldIntercept returns true for standard HTTP/HTTPS URLs", () => {
@@ -123,4 +123,77 @@ test("extractDownloadMetadata correctly extracts filename, url, referrer and siz
   assert.equal(meta.filename, "ubuntu-24.04.iso");
   assert.equal(meta.totalBytes, 4_500_000_000);
   assert.equal(meta.referrer, "https://releases.ubuntu.com/");
+});
+
+test("test_browser_interception_resumes_on_host_failure", async () => {
+  const settings = { ...DEFAULT_SETTINGS, enabled: true };
+  const item = {
+    id: 99,
+    url: "https://example.com/archive.zip",
+    filename: "archive.zip",
+    totalBytes: 5_000_000
+  };
+
+  const calls = {
+    paused: [],
+    resumed: [],
+    cancelled: [],
+    erased: [],
+    notifications: []
+  };
+
+  const actions = {
+    pause: async (id) => { calls.paused.push(id); },
+    resume: async (id) => { calls.resumed.push(id); },
+    cancel: async (id) => { calls.cancelled.push(id); },
+    erase: async (query) => { calls.erased.push(query); },
+    notifyUser: (title, msg) => { calls.notifications.push({ title, msg }); },
+    sendToHost: async () => { throw new Error("Connection refused (host offline)"); }
+  };
+
+  const result = await handleDownloadCreated(item, settings, actions);
+
+  assert.equal(result, false);
+  assert.deepEqual(calls.paused, [99]);
+  assert.deepEqual(calls.resumed, [99]);
+  assert.deepEqual(calls.cancelled, []);
+  assert.deepEqual(calls.erased, []);
+  assert.equal(calls.notifications.length, 1);
+  assert.equal(calls.notifications[0].title, "FetchTrek Unavailable");
+});
+
+test("test_browser_interception_cancels_on_host_success", async () => {
+  const settings = { ...DEFAULT_SETTINGS, enabled: true };
+  const item = {
+    id: 100,
+    url: "https://example.com/archive.zip",
+    filename: "archive.zip",
+    totalBytes: 5_000_000
+  };
+
+  const calls = {
+    paused: [],
+    resumed: [],
+    cancelled: [],
+    erased: [],
+    notifications: []
+  };
+
+  const actions = {
+    pause: async (id) => { calls.paused.push(id); },
+    resume: async (id) => { calls.resumed.push(id); },
+    cancel: async (id) => { calls.cancelled.push(id); },
+    erase: async (query) => { calls.erased.push(query); },
+    notifyUser: (title, msg) => { calls.notifications.push({ title, msg }); },
+    sendToHost: async () => ({ status: "ok", task_id: 42 })
+  };
+
+  const result = await handleDownloadCreated(item, settings, actions);
+
+  assert.equal(result, true);
+  assert.deepEqual(calls.paused, [100]);
+  assert.deepEqual(calls.cancelled, [100]);
+  assert.deepEqual(calls.erased, [{ id: 100 }]);
+  assert.deepEqual(calls.resumed, []);
+  assert.equal(calls.notifications.length, 0);
 });

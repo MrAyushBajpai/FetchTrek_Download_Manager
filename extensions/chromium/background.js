@@ -1,5 +1,5 @@
 import { getSettings } from "./storage.js";
-import { shouldIntercept, extractDownloadMetadata } from "./interceptor.js";
+import { shouldIntercept, extractDownloadMetadata, handleDownloadCreated } from "./interceptor.js";
 import { sendToHost, checkHostHealth } from "./native_client.js";
 import { buildSessionPayload, harvestCookies, harvestHeaders } from "./session.js";
 import { MediaRegistry, updateBadge, buildMediaDownloadPayload } from "./media_sniffer.js";
@@ -170,43 +170,35 @@ if (typeof chrome !== "undefined" && chrome.downloads?.onCreated) {
     try {
       const settings = await getSettings();
 
-      if (!shouldIntercept(item, settings)) {
-        return;
-      }
+      const success = await handleDownloadCreated(item, settings, {
+        pause: (id) => chrome.downloads.pause(id),
+        cancel: (id) => chrome.downloads.cancel(id),
+        erase: (query) => chrome.downloads.erase(query),
+        resume: (id) => chrome.downloads.resume(id),
+        notifyUser: (title, msg) => notifyUser(title, msg),
+        sendToHost: (payload) => sendToHost(payload),
+        buildPayload: async (dlItem) => {
+          const meta = extractDownloadMetadata(dlItem);
+          const session = await buildSessionPayload(dlItem);
+          return {
+            action: "intercept_download",
+            url: meta.url,
+            filename: meta.filename,
+            destination_path: null,
+            headers: session.headers,
+            cookies: session.cookies,
+            user_agent: session.user_agent,
+            referer: session.referer,
+            connections: 4
+          };
+        }
+      });
 
-      // Race-free cancellation: Cancel and erase immediately to suppress browser shelf
-      try {
-        await chrome.downloads.cancel(item.id);
-        await chrome.downloads.erase({ id: item.id });
-      } catch (cancelErr) {
-        console.warn("[FetchTrek] Non-fatal cancel/erase error:", cancelErr);
-      }
-
-      const meta = extractDownloadMetadata(item);
-      const session = await buildSessionPayload(item);
-
-      const payload = {
-        action: "intercept_download",
-        url: meta.url,
-        filename: meta.filename,
-        destination_path: null,
-        headers: session.headers,
-        cookies: session.cookies,
-        user_agent: session.user_agent,
-        referer: session.referer,
-        connections: 4
-      };
-
-      const response = await sendToHost(payload);
-      if (response && response.status === "ok") {
-        console.log("[FetchTrek] Intercepted download routed to host:", meta.filename || meta.url);
+      if (success) {
         setBadge("✓", "#10B981");
         setTimeout(() => setBadge("", "#10B981"), 3000);
       } else {
-        const errorMsg = response?.message || "Unknown error from native host";
-        console.error("[FetchTrek] Native host rejected download:", errorMsg);
         setBadge("!", "#EF4444");
-        notifyUser("FetchTrek Error", errorMsg);
       }
     } catch (err) {
       console.error("[FetchTrek] Interception failure:", err);

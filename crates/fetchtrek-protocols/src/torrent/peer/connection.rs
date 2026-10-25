@@ -184,34 +184,9 @@ impl PeerConnection {
                 self.set_piece_have(*piece_index as usize);
             }
             PeerMessage::Bitfield(data) => {
-                let expected_bytes = if self.num_pieces > 0 {
-                    self.num_pieces.div_ceil(8)
-                } else {
-                    data.len()
-                };
-
-                if self.num_pieces > 0 && data.len() != expected_bytes {
-                    return Err(TorrentError::ProtocolError(format!(
-                        "Bitfield length {} bytes does not match expected {} bytes for {} pieces",
-                        data.len(),
-                        expected_bytes,
-                        self.num_pieces
-                    )));
+                if self.num_pieces > 0 {
+                    PeerMessage::validate_bitfield(data, self.num_pieces)?;
                 }
-
-                if self.num_pieces > 0 && !self.num_pieces.is_multiple_of(8) {
-                    let spare_bits = 8 - (self.num_pieces % 8);
-                    let spare_mask = (1 << spare_bits) - 1;
-                    if let Some(&last_byte) = data.last() {
-                        if (last_byte & spare_mask) != 0 {
-                            return Err(TorrentError::ProtocolError(format!(
-                                "Bitfield contains set bits in trailing spare positions: byte 0x{:02X}, mask 0x{:02X}",
-                                last_byte, spare_mask
-                            )));
-                        }
-                    }
-                }
-
                 self.bitfield = Some(data.clone());
             }
             PeerMessage::HaveAll if self.num_pieces > 0 => {

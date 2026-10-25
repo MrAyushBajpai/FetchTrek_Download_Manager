@@ -28,6 +28,7 @@ pub enum NetworkError {
     NoRangeSupport,
     ETagMismatch,
     AccessDenied,
+    ProtocolError,
 }
 
 impl NetworkError {
@@ -37,9 +38,10 @@ impl NetworkError {
             | Self::GatewayTimeout
             | Self::RateLimited
             | Self::SocketTimeout => ErrorClassification::RecoverableTransient,
-            Self::NoRangeSupport | Self::ETagMismatch | Self::AccessDenied => {
-                ErrorClassification::TerminalFault
-            }
+            Self::NoRangeSupport
+            | Self::ETagMismatch
+            | Self::AccessDenied
+            | Self::ProtocolError => ErrorClassification::TerminalFault,
         }
     }
 
@@ -61,6 +63,7 @@ impl fmt::Display for NetworkError {
             Self::NoRangeSupport => write!(f, "server does not support byte ranges"),
             Self::ETagMismatch => write!(f, "etag precondition mismatch"),
             Self::AccessDenied => write!(f, "network access denied (403)"),
+            Self::ProtocolError => write!(f, "protocol error (malformed or mismatched response)"),
         }
     }
 }

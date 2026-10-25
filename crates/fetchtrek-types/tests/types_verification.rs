@@ -268,6 +268,7 @@ fn test_error_classification_and_recovery() {
         NetworkError::NoRangeSupport,
         NetworkError::ETagMismatch,
         NetworkError::AccessDenied,
+        NetworkError::ProtocolError,
     ];
     for err in terminal_network {
         assert_eq!(err.classification(), ErrorClassification::TerminalFault);

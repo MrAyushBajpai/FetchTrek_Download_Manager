@@ -153,9 +153,12 @@ fn test_single_file_torrent_parsing() {
         b"name".to_vec(),
         BencodeValue::Bytes(b"ubuntu-24.04-desktop-amd64.iso".to_vec()),
     );
-    info_map.insert(b"piece length".to_vec(), BencodeValue::Integer(262144));
+    info_map.insert(
+        b"piece length".to_vec(),
+        BencodeValue::Integer(2_000_000_000),
+    );
 
-    // 3 pieces = 60 bytes
+    // 3 pieces = 60 bytes (each 2 GB covers 6 GB)
     let mut pieces = Vec::with_capacity(60);
     pieces.extend_from_slice(&[0x11; 20]);
     pieces.extend_from_slice(&[0x22; 20]);
@@ -192,7 +195,7 @@ fn test_single_file_torrent_parsing() {
 
     assert_eq!(meta.info_hash, expected_info_hash);
     assert_eq!(meta.name, "ubuntu-24.04-desktop-amd64.iso");
-    assert_eq!(meta.piece_length, 262144);
+    assert_eq!(meta.piece_length, 2_000_000_000);
     assert_eq!(meta.pieces.len(), 3);
     assert_eq!(meta.pieces[0], [0x11; 20]);
     assert_eq!(meta.pieces[1], [0x22; 20]);
@@ -228,7 +231,7 @@ fn test_multi_file_torrent_parsing() {
         b"name".to_vec(),
         BencodeValue::Bytes(b"music_album".to_vec()),
     );
-    info_map.insert(b"piece length".to_vec(), BencodeValue::Integer(131072));
+    info_map.insert(b"piece length".to_vec(), BencodeValue::Integer(10_000_000));
 
     let mut pieces = Vec::with_capacity(40);
     pieces.extend_from_slice(&[0xAA; 20]);
@@ -289,7 +292,7 @@ fn test_multi_file_torrent_parsing() {
 
     assert_eq!(meta.info_hash, expected_info_hash);
     assert_eq!(meta.name, "music_album");
-    assert_eq!(meta.piece_length, 131072);
+    assert_eq!(meta.piece_length, 10_000_000);
     assert_eq!(meta.pieces.len(), 2);
     assert!(meta.is_private);
     assert_eq!(meta.total_length, 13_700_000);

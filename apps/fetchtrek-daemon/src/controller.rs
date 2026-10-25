@@ -342,6 +342,14 @@ impl TaskController {
             db.create_task(&new_task)?
         };
 
+        let mut context = context;
+        if let Some(ref etag) = new_task.etag {
+            context.etag = Some(etag.clone());
+        }
+        if total_bytes > 0 {
+            context.expected_total_bytes = Some(total_bytes);
+        }
+
         self.task_contexts
             .write()
             .await
@@ -424,13 +432,21 @@ impl TaskController {
             }
 
             // 2. Session channels and metrics
-            let task_context = self_clone
+            let mut task_context_obj = (*self_clone
                 .task_contexts
                 .read()
                 .await
                 .get(&task_id)
                 .cloned()
-                .unwrap_or_else(|| Arc::new(SessionContext::default()));
+                .unwrap_or_else(|| Arc::new(SessionContext::default())))
+            .clone();
+            if task_context_obj.etag.is_none() && task.etag.is_some() {
+                task_context_obj.etag = task.etag.clone();
+            }
+            if task_context_obj.expected_total_bytes.is_none() && task.total_bytes > 0 {
+                task_context_obj.expected_total_bytes = Some(task.total_bytes);
+            }
+            let task_context = Arc::new(task_context_obj);
             let (cancel_tx, cancel_rx) = watch::channel(false);
             let downloaded_bytes = Arc::new(AtomicU64::new(task.downloaded_bytes));
             let speed_bps = Arc::new(AtomicU64::new(0));
@@ -612,6 +628,8 @@ impl TaskController {
                                 )))
                             }
                         };
+                        let mut bytes_read_from_stream: u64 = 0;
+                        let expected_stream_len = stream_range.len();
 
                         loop {
                             if *cancel_rx_worker.borrow() {
@@ -655,12 +673,18 @@ impl TaskController {
                                 res = stream.read(&mut buf[..max_read]) => {
                                     match res {
                                         Ok(0) => {
-                                            if cur_pos <= cur_limit {
+                                            if bytes_read_from_stream < expected_stream_len && cur_pos <= cur_limit {
                                                 return Err(DaemonError::Internal("Connection reset early".to_string()));
                                             }
                                             break;
                                         }
-                                        Ok(n) => n,
+                                        Ok(n) => {
+                                            bytes_read_from_stream += n as u64;
+                                            if bytes_read_from_stream > expected_stream_len {
+                                                return Err(DaemonError::Internal("Stream delivered more bytes than requested range".to_string()));
+                                            }
+                                            n
+                                        }
                                         Err(e) => return Err(DaemonError::Internal(format!("Read error: {}", e))),
                                     }
                                 }

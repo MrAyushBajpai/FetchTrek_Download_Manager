@@ -6,7 +6,7 @@ use fetchtrek_types::{ByteRange, NetworkError};
 use futures_util::TryStreamExt;
 use reqwest::header::{
     HeaderName, HeaderValue, ACCEPT_RANGES, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE,
-    CONTENT_TYPE, COOKIE, ETAG, RANGE, REFERER, USER_AGENT,
+    CONTENT_TYPE, COOKIE, ETAG, IF_RANGE, RANGE, REFERER, USER_AGENT,
 };
 use reqwest::{Client, RequestBuilder, Response, StatusCode};
 use tokio_util::io::StreamReader;
@@ -118,7 +118,17 @@ impl NetworkTransport for HttpTransport {
         context: &SessionContext,
     ) -> Result<Pin<Box<dyn ByteStream>>, NetworkError> {
         let range_header = format!("bytes={}-{}", range.start, range.end);
-        let req = self.client.get(url).header(RANGE, range_header);
+        let mut req = self.client.get(url).header(RANGE, range_header);
+
+        if let Some(ref etag) = context.etag {
+            let formatted_etag = if etag.starts_with('"') || etag.starts_with("W/\"") {
+                etag.clone()
+            } else {
+                format!("\"{etag}\"")
+            };
+            req = req.header(IF_RANGE, formatted_etag);
+        }
+
         let req = apply_context(req, context);
 
         let resp = match req.send().await {
@@ -128,10 +138,53 @@ impl NetworkTransport for HttpTransport {
 
         let status = resp.status();
         match status {
-            StatusCode::PARTIAL_CONTENT => {}
+            StatusCode::PARTIAL_CONTENT => {
+                // Representation pinning: check ETag header if returned
+                if let Some(ref expected_etag) = context.etag {
+                    if let Some(resp_etag) =
+                        resp.headers().get(ETAG).and_then(|val| val.to_str().ok())
+                    {
+                        let trimmed_resp = resp_etag.trim_matches('"');
+                        let trimmed_expected = expected_etag.trim_matches('"');
+                        if trimmed_resp != trimmed_expected {
+                            return Err(NetworkError::ETagMismatch);
+                        }
+                    }
+                }
+
+                // Strictly validate Content-Range response header (BEP/HTTP 206 contract)
+                let content_range = resp
+                    .headers()
+                    .get(CONTENT_RANGE)
+                    .and_then(|val| val.to_str().ok())
+                    .and_then(parse_content_range_header);
+
+                let parsed = match content_range {
+                    Some(cr) => cr,
+                    None => return Err(NetworkError::ProtocolError),
+                };
+
+                if parsed.start != range.start || parsed.end != range.end {
+                    return Err(NetworkError::ProtocolError);
+                }
+
+                if let Some(expected_total) = context.expected_total_bytes {
+                    if let Some(total) = parsed.total {
+                        if total != expected_total {
+                            return Err(NetworkError::ProtocolError);
+                        }
+                    }
+                }
+            }
+            StatusCode::PRECONDITION_FAILED => {
+                return Err(NetworkError::ETagMismatch);
+            }
             StatusCode::OK => {
-                // If the server answered 200 OK to a range starting beyond 0,
-                // it ignored the range header and serves the entire body.
+                // If If-Range was provided and server returned 200 OK, the ETag representation changed
+                if context.etag.is_some() {
+                    return Err(NetworkError::ETagMismatch);
+                }
+                // If range was requested beyond 0 and server answered 200 OK without range
                 if range.start > 0 {
                     return Err(NetworkError::NoRangeSupport);
                 }
@@ -194,6 +247,33 @@ fn apply_context(mut req: RequestBuilder, context: &SessionContext) -> RequestBu
         }
     }
     req
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParsedContentRange {
+    pub start: u64,
+    pub end: u64,
+    pub total: Option<u64>,
+}
+
+pub fn parse_content_range_header(value: &str) -> Option<ParsedContentRange> {
+    let trimmed = value.trim();
+    let rest = trimmed.strip_prefix("bytes ")?.trim();
+    let slash_idx = rest.find('/')?;
+    let range_part = &rest[..slash_idx];
+    let total_part = rest[slash_idx + 1..].trim();
+
+    let dash_idx = range_part.find('-')?;
+    let start = range_part[..dash_idx].trim().parse::<u64>().ok()?;
+    let end = range_part[dash_idx + 1..].trim().parse::<u64>().ok()?;
+
+    let total = if total_part == "*" {
+        None
+    } else {
+        Some(total_part.parse::<u64>().ok()?)
+    };
+
+    Some(ParsedContentRange { start, end, total })
 }
 
 fn parse_content_range_total(value: &str) -> Option<u64> {

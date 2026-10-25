@@ -5,7 +5,7 @@ pub mod http;
 pub mod media;
 
 #[cfg(feature = "http")]
-pub use http::HttpTransport;
+pub use http::{parse_content_range_header, HttpTransport, ParsedContentRange};
 
 #[cfg(feature = "media")]
 pub use media::{

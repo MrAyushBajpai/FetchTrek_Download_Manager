@@ -136,16 +136,40 @@ async fn start_slow_mock_server() -> (String, oneshot::Sender<()>) {
                             let _ = socket.write_all(resp.as_bytes()).await;
                             let _ = socket.shutdown().await;
                         } else if method == "GET" {
+                            let mut start = 0usize;
+                            let mut end = total_size - 1;
+                            for line in req.lines() {
+                                if let Some(range_val) = line
+                                    .strip_prefix("range: bytes=")
+                                    .or_else(|| line.strip_prefix("Range: bytes="))
+                                {
+                                    if let Some(dash_idx) = range_val.find('-') {
+                                        if let Ok(s) = range_val[..dash_idx].trim().parse::<usize>()
+                                        {
+                                            start = s;
+                                        }
+                                        if let Ok(e) =
+                                            range_val[dash_idx + 1..].trim().parse::<usize>()
+                                        {
+                                            end = e;
+                                        }
+                                    }
+                                }
+                            }
+                            let chunk_len = end.saturating_sub(start) + 1;
                             let header = format!(
-                                "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-{}/{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                                total_size - 1, total_size, total_size
+                                "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {}-{}/{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                start, end, total_size, chunk_len
                             );
                             let _ = socket.write_all(header.as_bytes()).await;
                             let chunk = vec![0xAB; 64 * 1024];
-                            for _ in 0..(total_size / (64 * 1024)) {
-                                if socket.write_all(&chunk).await.is_err() {
+                            let mut remaining = chunk_len;
+                            while remaining > 0 {
+                                let to_write = remaining.min(chunk.len());
+                                if socket.write_all(&chunk[..to_write]).await.is_err() {
                                     break;
                                 }
+                                remaining -= to_write;
                                 tokio::time::sleep(Duration::from_millis(50)).await;
                             }
                             let _ = socket.shutdown().await;

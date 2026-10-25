@@ -296,7 +296,7 @@ pub fn start_torrent_download(
 
                                             let complete_payload = {
                                                 let mut p_guard = picker_clone.lock().await;
-                                                p_guard.ingest_block(index, begin, &block)
+                                                p_guard.ingest_block_from_peer(index, begin, &block, Some(&conn.remote_peer_id))
                                             };
 
                                             if let Ok(Some(full_piece)) = complete_payload {

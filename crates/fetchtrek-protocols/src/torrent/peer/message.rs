@@ -61,6 +61,34 @@ pub enum PeerMessage {
 }
 
 impl PeerMessage {
+    /// Validates a bitfield payload against expected piece count according to BEP 0003:
+    /// 1. Byte length must equal ceil(num_pieces / 8).
+    /// 2. If num_pieces is not a multiple of 8, all trailing spare bits in the final byte must be zero.
+    pub fn validate_bitfield(data: &[u8], num_pieces: usize) -> Result<(), TorrentError> {
+        let expected_bytes = num_pieces.div_ceil(8);
+        if data.len() != expected_bytes {
+            return Err(TorrentError::ProtocolError(format!(
+                "Bitfield length {} bytes does not match expected {expected_bytes} bytes for {num_pieces} pieces",
+                data.len()
+            )));
+        }
+
+        let rem = num_pieces % 8;
+        if rem != 0 {
+            let spare_bits = 8 - rem;
+            let spare_mask = (1u8 << spare_bits) - 1;
+            if let Some(&last_byte) = data.last() {
+                if (last_byte & spare_mask) != 0 {
+                    return Err(TorrentError::ProtocolError(format!(
+                        "Bitfield contains set bits in trailing spare positions: byte 0x{last_byte:02X}, mask 0x{spare_mask:02X}"
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Encodes this message into standard framed wire representation with 4-byte length prefix.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();

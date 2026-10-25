@@ -6,6 +6,7 @@ use std::collections::HashMap;
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum BrowserRequest {
     Ping,
+    #[serde(alias = "add_download")]
     InterceptDownload {
         url: String,
         #[serde(default)]
@@ -50,6 +51,8 @@ pub enum HostResponse {
     TaskCreated {
         status: String,
         action: String,
+        #[serde(default = "default_true")]
+        success: bool,
         task_id: i64,
         uuid: String,
     },
@@ -68,6 +71,10 @@ pub enum HostResponse {
     },
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl HostResponse {
     pub fn pong(version: impl Into<String>) -> Self {
         Self::Pong {
@@ -81,6 +88,7 @@ impl HostResponse {
         Self::TaskCreated {
             status: "ok".into(),
             action: "task_created".into(),
+            success: true,
             task_id,
             uuid: uuid.into(),
         }

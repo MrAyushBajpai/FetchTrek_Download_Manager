@@ -126,3 +126,75 @@ export function extractDownloadMetadata(downloadItem) {
     referrer
   };
 }
+
+/**
+ * Orchestrates download interception using a safe state-machine:
+ * - Intercepting: Pauses download in browser to prevent dual network activity.
+ * - Submitting: Sends metadata/session to native host.
+ * - Acknowledged (success): Cancels and erases browser download.
+ * - Failed (error/timeout/rejection): Resumes browser download and notifies user.
+ *
+ * @param {object} item - Chrome download item.
+ * @param {object} settings - User settings.
+ * @param {object} actions - Action delegates: { pause, cancel, erase, resume, notifyUser, sendToHost, buildPayload }
+ * @returns {Promise<boolean>} True if successfully handed off to host, false if resumed or skipped.
+ */
+export async function handleDownloadCreated(item, settings, actions = {}) {
+  if (!shouldIntercept(item, settings)) {
+    return false;
+  }
+
+  const { pause, cancel, erase, resume, notifyUser, sendToHost, buildPayload } = actions;
+
+  // Step 1: Pause browser download to freeze network activity while contacting host
+  try {
+    if (pause) {
+      await pause(item.id);
+    }
+  } catch (pauseErr) {
+    console.warn("[FetchTrek] Pause error (non-fatal):", pauseErr);
+  }
+
+  // Step 2: Build payload and submit to native host
+  let success = false;
+  let errorMsg = "";
+
+  try {
+    const payload = buildPayload ? await buildPayload(item) : item;
+    const response = sendToHost ? await sendToHost(payload) : null;
+    if (response && (response.status === "ok" || response.success === true)) {
+      success = true;
+    } else {
+      errorMsg = response?.message || response?.error || "Native host rejected download";
+    }
+  } catch (err) {
+    errorMsg = err?.message || "Failed to communicate with FetchTrek desktop host";
+  }
+
+  if (success) {
+    // Step 3: Acknowledged by host -> cancel and erase from browser shelf
+    try {
+      if (cancel) await cancel(item.id);
+      if (erase) await erase({ id: item.id });
+    } catch (cancelErr) {
+      console.warn("[FetchTrek] Non-fatal cancel/erase error:", cancelErr);
+    }
+    return true;
+  } else {
+    // Step 4: Failed -> resume in browser and notify user
+    try {
+      if (resume) {
+        await resume(item.id);
+      }
+    } catch (resumeErr) {
+      console.error("[FetchTrek] Failed to resume download in browser:", resumeErr);
+    }
+    if (notifyUser) {
+      notifyUser(
+        "FetchTrek Unavailable",
+        "FetchTrek unavailable; download continuing in browser."
+      );
+    }
+    return false;
+  }
+}
