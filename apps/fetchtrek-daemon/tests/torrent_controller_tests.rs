@@ -460,6 +460,9 @@ async fn test_torrent_session_pause_and_resume() {
                     begin,
                     length,
                 } => {
+                    if index != 0 {
+                        continue;
+                    }
                     let start = (index as usize * PIECE_SIZE as usize) + begin as usize;
                     let end = start + length as usize;
                     let block = payload_clone[start..end].to_vec();
