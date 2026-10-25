@@ -11,6 +11,7 @@ pub enum HostError {
     Io(std::io::Error),
     Timeout,
     DaemonOffline(String),
+    Registration(String),
 }
 
 impl fmt::Display for HostError {
@@ -30,6 +31,7 @@ impl fmt::Display for HostError {
             Self::Io(e) => write!(f, "I/O error: {e}"),
             Self::Timeout => write!(f, "Daemon timeout"),
             Self::DaemonOffline(msg) => write!(f, "Daemon connection offline: {msg}"),
+            Self::Registration(msg) => write!(f, "Registration error: {msg}"),
         }
     }
 }
