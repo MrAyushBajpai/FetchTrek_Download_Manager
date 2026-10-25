@@ -1,0 +1,473 @@
+import { DesignTokens } from "tokens.slint";
+import { SmoothProgressBar } from "progress_bar.slint";
+import { StatusPill, TaskDisplayStatus } from "status_pill.slint";
+import { ChunkMap, ChunkSlice, WorkerCursor } from "chunk_map.slint";
+import { SpeedChart } from "speed_chart.slint";
+
+export { ChunkSlice, WorkerCursor }
+
+export struct InspectorDetails {
+    has_selection: bool,
+    task_id: string,
+    filename: string,
+    total_size_formatted: string,
+    downloaded_formatted: string,
+    speed_formatted: string,
+    eta_formatted: string,
+    progress: float,
+    progress_percent_formatted: string,
+    status: TaskDisplayStatus,
+    source_url: string,
+    destination_path: string,
+    connection_count: int,
+    chunks: [ChunkSlice],
+    cursors: [WorkerCursor],
+    speed_history: [float],
+    peak_speed_formatted: string,
+}
+
+component InspectorTile inherits Rectangle {
+    in property <string> label;
+    background: DesignTokens.surface-card;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: DesignTokens.border-hairline;
+    height: 48px;
+
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 4px;
+        alignment: space-between;
+
+        Text {
+            text: root.label;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: DesignTokens.text-muted;
+        }
+
+        @children
+    }
+}
+
+export component Inspector inherits Rectangle {
+    in-out property <bool> is_expanded: true;
+    in property <InspectorDetails> details;
+
+    callback toggle_expand_clicked();
+    callback open_folder_clicked(string);
+    callback copy_url_clicked(string);
+    callback inspector_pause_resume_clicked(string);
+    callback inspector_cancel_clicked(string);
+
+    background: DesignTokens.surface-sidebar;
+    height: root.is_expanded ? 260px : 36px;
+    clip: true;
+
+    animate height {
+        duration: 150ms;
+        easing: ease-out;
+    }
+
+    // Top hairline divider
+    Rectangle {
+        y: 0px;
+        height: 1px;
+        background: DesignTokens.border-hairline;
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // 1. Header Strip (36px)
+        Rectangle {
+            height: 36px;
+            background: header_touch.has-hover ? DesignTokens.surface-hover : #00000000;
+
+            header_touch := TouchArea {
+                clicked => {
+                    root.is_expanded = !root.is_expanded;
+                    root.toggle_expand_clicked();
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: space-between;
+
+                // Left: Document glyph + filename + size badge
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: "📄";
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: root.details.has_selection ? root.details.filename : "Inspector Drawer";
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: root.details.has_selection ? DesignTokens.text-primary : DesignTokens.text-secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    if root.details.has_selection : VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 18px;
+                            border-radius: 4px;
+                            background: DesignTokens.surface-inset;
+                            border-width: 1px;
+                            border-color: DesignTokens.border-hairline;
+
+                            HorizontalLayout {
+                                padding-left: 6px;
+                                padding-right: 6px;
+                                alignment: center;
+
+                                Text {
+                                    text: root.details.total_size_formatted;
+                                    font-size: 10px;
+                                    font-family: "monospace";
+                                    font-weight: 600;
+                                    color: DesignTokens.text-secondary;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Right: Connection count pill + Chevron toggle
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    if root.details.has_selection : VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 20px;
+                            border-radius: 4px;
+                            background: DesignTokens.surface-card;
+                            border-width: 1px;
+                            border-color: DesignTokens.border-hairline;
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                alignment: center;
+
+                                Text {
+                                    text: root.details.connection_count + " conns";
+                                    font-size: 10px;
+                                    font-family: "monospace";
+                                    font-weight: 600;
+                                    color: DesignTokens.primary-blue;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 4px;
+                            background: DesignTokens.surface-card;
+                            border-width: 1px;
+                            border-color: DesignTokens.border-hairline;
+
+                            Text {
+                                text: root.is_expanded ? "∨" : "∧";
+                                font-size: 11px;
+                                font-weight: 700;
+                                color: DesignTokens.text-primary;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Expanded Content Body (224px)
+        if root.is_expanded : Rectangle {
+            height: 224px;
+            background: DesignTokens.surface-void;
+
+            if !root.details.has_selection : VerticalLayout {
+                alignment: center;
+                spacing: 8px;
+
+                Text {
+                    text: "📊";
+                    font-size: 24px;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: "Select a download to inspect transfer telemetry and segment chunk maps";
+                    font-size: 12px;
+                    color: DesignTokens.text-muted;
+                    horizontal-alignment: center;
+                }
+            }
+
+            if root.details.has_selection : VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 8px;
+                padding-bottom: 12px;
+                spacing: 10px;
+
+                // Top 5-Card Metric Strip
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    InspectorTile {
+                        label: "STATUS";
+                        StatusPill {
+                            status: root.details.status;
+                        }
+                    }
+
+                    InspectorTile {
+                        label: "TRANSFER SPEED";
+                        Text {
+                            text: root.details.speed_formatted;
+                            font-size: 14px;
+                            font-weight: 700;
+                            font-family: "monospace";
+                            color: DesignTokens.primary-blue;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    InspectorTile {
+                        label: "TIME REMAINING (ETA)";
+                        Text {
+                            text: root.details.eta_formatted;
+                            font-size: 14px;
+                            font-weight: 700;
+                            font-family: "monospace";
+                            color: DesignTokens.text-primary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    InspectorTile {
+                        label: "DOWNLOADED / TOTAL";
+                        Text {
+                            text: root.details.downloaded_formatted + " / " + root.details.total_size_formatted;
+                            font-size: 11px;
+                            font-weight: 600;
+                            font-family: "monospace";
+                            color: DesignTokens.text-secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    InspectorTile {
+                        label: "PROGRESS (" + root.details.progress_percent_formatted + ")";
+                        SmoothProgressBar {
+                            progress: root.details.progress;
+                            fill-color: root.details.status == TaskDisplayStatus.Completed ? DesignTokens.status-green :
+                                        root.details.status == TaskDisplayStatus.Paused ? DesignTokens.status-yellow :
+                                        root.details.status == TaskDisplayStatus.Failed ? DesignTokens.status-red :
+                                        DesignTokens.primary-blue;
+                        }
+                    }
+                }
+
+                // Middle: Visualization Split (Chunk Map + Speed Sparkline)
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    // Left: Segment Chunk Map
+                    VerticalLayout {
+                        horizontal-stretch: 1.0;
+                        spacing: 4px;
+
+                        Text {
+                            text: "SEGMENT CHUNK MAP (PHYSICAL BYTE ALLOCATION)";
+                            font-size: 9px;
+                            font-weight: 700;
+                            letter-spacing: 0.5px;
+                            color: DesignTokens.text-muted;
+                        }
+
+                        ChunkMap {
+                            chunks: root.details.chunks;
+                            cursors: root.details.cursors;
+                        }
+                    }
+
+                    // Right: 60-Second Speed Sparkline
+                    VerticalLayout {
+                        width: 320px;
+                        spacing: 4px;
+
+                        Text {
+                            text: "TRANSFER SPEED (LAST 60 SECONDS)";
+                            font-size: 9px;
+                            font-weight: 700;
+                            letter-spacing: 0.5px;
+                            color: DesignTokens.text-muted;
+                        }
+
+                        SpeedChart {
+                            points: root.details.speed_history;
+                            peak_speed: root.details.peak_speed_formatted;
+                        }
+                    }
+                }
+
+                // Bottom: Source & Destination Routing Card
+                Rectangle {
+                    height: 38px;
+                    background: DesignTokens.surface-card;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: DesignTokens.border-hairline;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 12px;
+                        alignment: space-between;
+
+                        // Target Path & Open Folder
+                        HorizontalLayout {
+                            horizontal-stretch: 1.0;
+                            spacing: 8px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "📁 " + root.details.destination_path;
+                                    font-size: 11px;
+                                    color: DesignTokens.text-secondary;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    height: 24px;
+                                    border-radius: 4px;
+                                    background: folder_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-input;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border-hairline;
+
+                                    folder_touch := TouchArea {
+                                        clicked => {
+                                            root.open_folder_clicked(root.details.destination_path);
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        alignment: center;
+
+                                        Text {
+                                            text: "Reveal";
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: DesignTokens.text-primary;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Fast Task Controls: Pause/Resume & Cancel
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    height: 24px;
+                                    border-radius: 4px;
+                                    background: pause_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-input;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border-hairline;
+
+                                    pause_touch := TouchArea {
+                                        clicked => {
+                                            root.inspector_pause_resume_clicked(root.details.task_id);
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        alignment: center;
+
+                                        Text {
+                                            text: root.details.status == TaskDisplayStatus.Downloading ? "⏸ Pause" : "▶ Resume";
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: root.details.status == TaskDisplayStatus.Downloading ? DesignTokens.status-yellow : DesignTokens.primary-blue;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    height: 24px;
+                                    border-radius: 4px;
+                                    background: cancel_touch.has-hover ? DesignTokens.status-red.with-alpha(0.2) : DesignTokens.surface-input;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border-hairline;
+
+                                    cancel_touch := TouchArea {
+                                        clicked => {
+                                            root.inspector_cancel_clicked(root.details.task_id);
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        alignment: center;
+
+                                        Text {
+                                            text: "✕ Cancel";
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: DesignTokens.status-red;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

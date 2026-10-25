@@ -3,9 +3,11 @@ import { HeaderBar } from "header.slint";
 import { Sidebar } from "sidebar.slint";
 import { TaskTable, TaskRowData } from "task_table.slint";
 import { TaskDisplayStatus } from "status_pill.slint";
+import { Inspector, InspectorDetails, ChunkSlice, WorkerCursor } from "inspector.slint";
 
 export { TaskRowData }
 export { TaskDisplayStatus }
+export { InspectorDetails, ChunkSlice, WorkerCursor }
 
 export component MainWindow inherits Window {
     title: "FetchTrek Download Manager";
@@ -27,6 +29,9 @@ export component MainWindow inherits Window {
     in property <string> aggregate_upload_speed: "0.0 MB/s";
     in property <string> daemon_status: "Connecting...";
 
+    in-out property <bool> is_inspector_expanded: true;
+    in-out property <InspectorDetails> inspector_details;
+
     callback add_download_clicked();
     callback resume_all_clicked();
     callback pause_all_clicked();
@@ -41,6 +46,8 @@ export component MainWindow inherits Window {
     callback batch_pause_clicked();
     callback batch_delete_clicked();
     callback deselect_all_clicked();
+    callback open_folder_clicked(string);
+    callback copy_url_clicked(string);
 
     VerticalLayout {
         spacing: 0px;
@@ -72,18 +79,32 @@ export component MainWindow inherits Window {
                 filter_category_selected(cat) => { root.filter_category_selected(cat); }
             }
 
-            // Central Task Data Table
-            TaskTable {
-                tasks <=> root.tasks;
-                selected_count: root.selected_count;
-                row_selected(id) => { root.row_selected(id); }
-                row_toggle_pause_resume(id) => { root.row_toggle_pause_resume(id); }
-                row_open_folder(id) => { root.row_open_folder(id); }
-                row_delete(id) => { root.row_delete(id); }
-                batch_resume_clicked => { root.batch_resume_clicked(); }
-                batch_pause_clicked => { root.batch_pause_clicked(); }
-                batch_delete_clicked => { root.batch_delete_clicked(); }
-                deselect_all_clicked => { root.deselect_all_clicked(); }
+            // Central Work Area: Table + Collapsible Inspector Drawer
+            VerticalLayout {
+                spacing: 0px;
+
+                TaskTable {
+                    vertical-stretch: 1.0;
+                    tasks <=> root.tasks;
+                    selected_count: root.selected_count;
+                    row_selected(id) => { root.row_selected(id); }
+                    row_toggle_pause_resume(id) => { root.row_toggle_pause_resume(id); }
+                    row_open_folder(id) => { root.row_open_folder(id); }
+                    row_delete(id) => { root.row_delete(id); }
+                    batch_resume_clicked => { root.batch_resume_clicked(); }
+                    batch_pause_clicked => { root.batch_pause_clicked(); }
+                    batch_delete_clicked => { root.batch_delete_clicked(); }
+                    deselect_all_clicked => { root.deselect_all_clicked(); }
+                }
+
+                Inspector {
+                    is_expanded <=> root.is_inspector_expanded;
+                    details: root.inspector_details;
+                    open_folder_clicked(path) => { root.open_folder_clicked(path); }
+                    copy_url_clicked(url) => { root.copy_url_clicked(url); }
+                    inspector_pause_resume_clicked(id) => { root.row_toggle_pause_resume(id); }
+                    inspector_cancel_clicked(id) => { root.row_delete(id); }
+                }
             }
         }
     }
