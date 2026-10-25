@@ -32,6 +32,47 @@ pub struct ActiveTaskSession {
     pub join_handle: Option<JoinHandle<Result<(), DaemonError>>>,
 }
 
+pub fn detect_stream_protocol(url: &str, mime_type: Option<&str>) -> Option<&'static str> {
+    let url_lower = url.to_lowercase();
+    let url_path = url_lower
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .split('#')
+        .next()
+        .unwrap_or("");
+
+    if url_path.ends_with(".m3u8") || url_lower.contains(".m3u8?") || url_lower.contains(".m3u8#") {
+        return Some("hls");
+    }
+    if url_path.ends_with(".mpd") || url_lower.contains(".mpd?") || url_lower.contains(".mpd#") {
+        return Some("dash");
+    }
+
+    if let Some(mime) = mime_type {
+        let mime_lower = mime.to_lowercase();
+        if mime_lower.contains("vnd.apple.mpegurl") || mime_lower.contains("x-mpegurl") {
+            return Some("hls");
+        }
+        if mime_lower.contains("dash+xml") {
+            return Some("dash");
+        }
+    }
+
+    None
+}
+
+pub fn sanitize_media_filename(filename: &str) -> String {
+    let lower = filename.to_lowercase();
+    if lower.ends_with(".m3u8") {
+        format!("{}.mp4", &filename[..filename.len() - 5])
+    } else if lower.ends_with(".mpd") {
+        format!("{}.mp4", &filename[..filename.len() - 4])
+    } else {
+        filename.to_string()
+    }
+}
+
 pub struct TaskController {
     pub database: Arc<std::sync::Mutex<Database>>,
     pub storage: Arc<PositionalStorage>,
@@ -82,8 +123,13 @@ impl TaskController {
             .await
             .map_err(|e| DaemonError::Internal(format!("Probe failed: {}", e)))?;
 
-        let total_bytes = probe_res.total_bytes.unwrap_or(0);
-        let resolved_filename = filename
+        let detected_protocol = detect_stream_protocol(url, probe_res.mime_type.as_deref());
+        let (total_bytes, protocol_str) = match detected_protocol {
+            Some(p) => (0u64, p),
+            None => (probe_res.total_bytes.unwrap_or(0), "http"),
+        };
+
+        let raw_filename = filename
             .map(|s| s.to_string())
             .or(probe_res.suggested_filename)
             .unwrap_or_else(|| {
@@ -93,6 +139,12 @@ impl TaskController {
                     .unwrap_or("download.bin")
                     .to_string()
             });
+
+        let resolved_filename = if detected_protocol.is_some() {
+            sanitize_media_filename(&raw_filename)
+        } else {
+            raw_filename
+        };
 
         let resolved_dest = destination_path
             .map(PathBuf::from)
@@ -111,7 +163,7 @@ impl TaskController {
             url,
             resolved_dest.to_string_lossy(),
             &resolved_filename,
-            "http",
+            protocol_str,
             total_bytes,
         );
         new_task.etag = probe_res.etag;
@@ -254,6 +306,38 @@ impl TaskController {
             let downloaded_bytes = Arc::new(AtomicU64::new(task.downloaded_bytes));
             let speed_bps = Arc::new(AtomicU64::new(0));
             let active_connections = Arc::new(AtomicU16::new(0));
+
+            // Media stream routing (HLS / MPEG-DASH)
+            if task.protocol == "hls" || task.protocol == "dash" {
+                let join_handle = crate::media_controller::start_media_stream_download(
+                    &self_clone,
+                    task.clone(),
+                    Arc::clone(&task_context),
+                    cancel_rx,
+                    Arc::clone(&downloaded_bytes),
+                    Arc::clone(&speed_bps),
+                    Arc::clone(&active_connections),
+                );
+
+                let session = ActiveTaskSession {
+                    task_id,
+                    uuid: task.uuid,
+                    cancel_tx,
+                    downloaded_bytes,
+                    speed_bps,
+                    active_connections,
+                    context: task_context,
+                    join_handle: Some(join_handle),
+                };
+
+                self_clone
+                    .active_sessions
+                    .write()
+                    .await
+                    .insert(task_id, session);
+
+                return Ok(());
+            }
 
             let active_cursors: Vec<(u32, Arc<AtomicSegmentCursor>)> = segments
                 .iter()
