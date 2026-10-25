@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "FetchTrek Download Integration",
+  "version": "0.1.0",
+  "description": "High-performance multi-connection download acceleration bridge for FetchTrek.",
+  "permissions": [
+    "downloads",
+    "nativeMessaging",
+    "storage",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FetchTrek Integration",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

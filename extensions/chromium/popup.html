@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FetchTrek Integration</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="popup-header">
+      <div class="brand">
+        <div class="logo-box">↓</div>
+        <div class="brand-text">
+          <span class="brand-title">FetchTrek</span>
+          <span class="version-tag">v0.1.0</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="status-strip" id="statusStrip">
+      <div class="status-dot checking" id="statusDot"></div>
+      <span class="status-text" id="statusText">Checking host connection...</span>
+    </div>
+
+    <main class="popup-body">
+      <div class="control-card">
+        <div class="control-row">
+          <div class="control-label">
+            <span class="title">Intercept Downloads</span>
+            <span class="desc">Route downloads to desktop accelerator</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="toggleInterception">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-col">
+          <label for="minSizeSelect" class="title">Minimum File Size</label>
+          <select id="minSizeSelect" class="select-input">
+            <option value="0">Any size (All downloads)</option>
+            <option value="5242880">5 MB or larger</option>
+            <option value="26214400">25 MB or larger</option>
+            <option value="104857600">100 MB or larger</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="action-card">
+        <button id="btnCheckHost" class="action-btn">Check Connection</button>
+      </div>
+    </main>
+
+    <footer class="popup-footer">
+      <span class="footer-note">FetchTrek Native Bridge</span>
+    </footer>
+  </div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
