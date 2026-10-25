@@ -1052,12 +1052,22 @@ async fn test_milestone_m4_feature_complete_exit_gate() {
         "BitTorrent payload SHA-256 parity mismatch"
     );
 
-    let recorded_haves = mock_server.get_recorded_haves_for(p4_info_hash);
+    let have_wait_start = Instant::now();
+    let recorded_haves = loop {
+        let observed = mock_server.get_recorded_haves_for(p4_info_hash);
+        if (0..PIECE_COUNT as u32).all(|p| observed.contains(&p))
+            || have_wait_start.elapsed() > Duration::from_millis(750)
+        {
+            break observed;
+        }
+        tokio::time::sleep(Duration::from_millis(15)).await;
+    };
     for p in 0..PIECE_COUNT as u32 {
         assert!(
             recorded_haves.contains(&p),
-            "Mock peer must have received Have message for piece {}",
-            p
+            "Mock peer must have received Have message for piece {} (observed: {:?})",
+            p,
+            recorded_haves
         );
     }
     println!("Phase 4 Gate PASS: 100% SHA-256 match on 128 KiB BitTorrent swarm transfer with all 4 pieces verified.");
