@@ -9,6 +9,12 @@ pub enum TorrentError {
     InvalidMetainfo(String),
     #[error("Invalid magnet URI: {0}")]
     InvalidMagnet(String),
+    #[error("Tracker returned error: {0}")]
+    TrackerError(String),
+    #[error("Tracker network/timeout error: {0}")]
+    TrackerNetwork(String),
+    #[error("Unsupported tracker protocol: {0}")]
+    UnsupportedTracker(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

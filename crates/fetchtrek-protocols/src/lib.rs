@@ -20,6 +20,7 @@ pub mod torrent;
 
 #[cfg(feature = "torrent")]
 pub use torrent::{
-    decode_base32, extract_raw_dict_value, sha1, to_base32, BencodeValue, MagnetLink, Sha1,
-    TorrentError, TorrentFile, TorrentMeta,
+    announce_http, announce_udp, decode_base32, deduplicate_peers, extract_raw_dict_value, sha1,
+    to_base32, AnnounceEvent, AnnounceRequest, AnnounceResponse, BencodeValue, MagnetLink,
+    PeerEndpoint, Sha1, TorrentError, TorrentFile, TorrentMeta, TrackerCoordinator,
 };
