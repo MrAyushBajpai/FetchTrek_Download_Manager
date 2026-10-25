@@ -23,3 +23,7 @@ futures-util = { version = "0.3", default-features = false, optional = true }
 quick-xml = { version = "0.41", optional = true }
 aes = { version = "0.8", optional = true }
 cbc = { version = "0.1", optional = true }
+
+[dev-dependencies]
+fetchtrek-storage = { path = "../fetchtrek-storage" }
+
