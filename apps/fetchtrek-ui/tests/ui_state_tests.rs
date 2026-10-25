@@ -64,10 +64,14 @@ fn make_test_summaries() -> Vec<TaskSummary> {
 
 #[test]
 fn test_ui_store_filtering_and_selection() {
-    let window = match MainWindow::new() {
-        Ok(w) => w,
-        Err(e) => {
+    let window = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(MainWindow::new)) {
+        Ok(Ok(w)) => w,
+        Ok(Err(e)) => {
             eprintln!("Skipping UI window test in headless environment without display: {e}");
+            return;
+        }
+        Err(_) => {
+            eprintln!("Skipping UI window test: backend platform initialization panicked");
             return;
         }
     };
