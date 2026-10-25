@@ -3,19 +3,13 @@ use std::sync::{Arc, RwLock};
 
 use fetchtrek_ipc::TaskSummary;
 use fetchtrek_types::TaskState;
+use fetchtrek_ui::clipboard;
+use fetchtrek_ui::config;
+use fetchtrek_ui::ipc_bridge::{self, UiCommand};
+use fetchtrek_ui::store::{self, init_store, with_store, with_store_mut};
+use fetchtrek_ui::tray::{self, TrayAction};
+use fetchtrek_ui::*;
 use slint::VecModel;
-
-mod clipboard;
-mod config;
-mod ipc_bridge;
-mod store;
-mod tray;
-
-use ipc_bridge::UiCommand;
-use store::{init_store, with_store, with_store_mut};
-use tray::TrayAction;
-
-slint::include_modules!();
 
 fn create_initial_mock_summaries() -> Vec<TaskSummary> {
     vec![
@@ -150,19 +144,23 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // Seed mock data for immediate standalone visualization
-    with_store_mut(|st| {
-        st.set_initial_tasks(create_initial_mock_summaries(), &main_window);
-        if let Some(record) = st.tasks.get_mut(&1) {
-            for i in 0..60 {
-                let speed = 12_000_000 + ((i * 350_000) % 8_000_000);
-                record.push_speed(speed);
-            }
-        }
-        st.update_inspector(&main_window);
-    });
-
     let args: Vec<String> = std::env::args().collect();
+    let load_mock_data = args.iter().any(|a| a == "--mock-data" || a == "--demo");
+
+    // Seed mock data only when explicitly requested via --mock-data / --demo flag (FT-QA-018)
+    if load_mock_data {
+        with_store_mut(|st| {
+            st.set_initial_tasks(create_initial_mock_summaries(), &main_window);
+            if let Some(record) = st.tasks.get_mut(&1) {
+                for i in 0..60 {
+                    let speed = 12_000_000 + ((i * 350_000) % 8_000_000);
+                    record.push_speed(speed);
+                }
+            }
+            st.update_inspector(&main_window);
+        });
+    }
+
     if args.iter().any(|a| a == "--show-add-modal") {
         let cur_dest = initial_settings.default_download_path.clone();
         main_window.set_add_form_data(AddTaskFormData {
@@ -296,9 +294,9 @@ fn main() -> Result<(), slint::PlatformError> {
         reveal_in_file_manager(&path);
     });
 
-    // Inspector copy URL
+    // Inspector copy URL to system clipboard (FT-QA-019)
     main_window.on_copy_url_clicked(move |url| {
-        println!("Copy URL requested: {}", url);
+        clipboard::write_clipboard_text(&url);
     });
 
     // Batch resume
@@ -550,13 +548,29 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    main_window.on_search_query_changed(move |query| {
-        println!("Search query updated: {}", query);
-    });
+    // Search query updated (FT-QA-017)
+    {
+        let weak_win = main_window.as_weak();
+        main_window.on_search_query_changed(move |query| {
+            if let Some(win) = weak_win.upgrade() {
+                with_store_mut(|st| {
+                    st.set_search_query(&query, &win);
+                });
+            }
+        });
+    }
 
-    main_window.on_filter_category_selected(move |category| {
-        println!("Sidebar filter selected: {}", category);
-    });
+    // Sidebar filter category selected (FT-QA-017)
+    {
+        let weak_win = main_window.as_weak();
+        main_window.on_filter_category_selected(move |category| {
+            if let Some(win) = weak_win.upgrade() {
+                with_store_mut(|st| {
+                    st.set_filter(&category, &win);
+                });
+            }
+        });
+    }
 
     main_window.run()
 }

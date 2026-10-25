@@ -229,6 +229,20 @@ pub struct TaskStore {
     pub id_order: Vec<i64>,
     pub slint_model: Rc<VecModel<TaskRowData>>,
     pub selected_task_id: Option<i64>,
+    pub active_filter: String,
+    pub search_query: String,
+}
+
+pub fn find_row_index(slint_model: &VecModel<TaskRowData>, id: i64) -> Option<usize> {
+    let id_str = id.to_string();
+    for i in 0..slint_model.row_count() {
+        if let Some(row) = slint_model.row_data(i) {
+            if row.id == id_str.as_str() {
+                return Some(i);
+            }
+        }
+    }
+    None
 }
 
 impl TaskStore {
@@ -238,14 +252,87 @@ impl TaskStore {
             id_order: Vec::new(),
             slint_model,
             selected_task_id: None,
+            active_filter: "all".to_string(),
+            search_query: String::new(),
         }
+    }
+
+    /// Determines if a given task matches the current active filter and search query.
+    pub fn matches_filter(&self, record: &TaskModelRecord) -> bool {
+        let cat = self.active_filter.trim().to_lowercase();
+        let matches_cat = match cat.as_str() {
+            "" | "all" | "all tasks" => true,
+            "downloading" => matches!(
+                record.status,
+                TaskState::Transferring
+                    | TaskState::Resolving
+                    | TaskState::Allocating
+                    | TaskState::PostProcessing
+            ),
+            "paused" => matches!(record.status, TaskState::Paused),
+            "completed" => matches!(record.status, TaskState::Completed),
+            "failed" => matches!(record.status, TaskState::FatalError),
+            "queued" => matches!(record.status, TaskState::Queued | TaskState::Retrying),
+            _ => true,
+        };
+
+        if !matches_cat {
+            return false;
+        }
+
+        let query = self.search_query.trim().to_lowercase();
+        if !query.is_empty() {
+            let matches_filename = record.filename.to_lowercase().contains(&query);
+            let matches_url = record.source_url.to_lowercase().contains(&query);
+            if !matches_filename && !matches_url {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Rebuilds the Slint visible model based on active filters while preserving valid selection.
+    pub fn rebuild_slint_model(&mut self, window: &MainWindow) {
+        let mut row_items = Vec::new();
+        let mut visible_selected = false;
+
+        for id in &self.id_order {
+            if let Some(record) = self.tasks.get(id) {
+                if self.matches_filter(record) {
+                    if self.selected_task_id == Some(*id) {
+                        visible_selected = true;
+                    }
+                    row_items.push(record.to_row_data());
+                }
+            }
+        }
+
+        if !visible_selected {
+            self.selected_task_id = row_items.first().and_then(|r| r.id.parse::<i64>().ok());
+        }
+
+        self.slint_model.set_vec(row_items);
+        self.refresh_counts(window);
+        self.update_inspector(window);
+    }
+
+    /// Updates the active sidebar filter category and updates visible rows.
+    pub fn set_filter(&mut self, category: &str, window: &MainWindow) {
+        self.active_filter = category.to_string();
+        self.rebuild_slint_model(window);
+    }
+
+    /// Updates the search query filter and updates visible rows.
+    pub fn set_search_query(&mut self, query: &str, window: &MainWindow) {
+        self.search_query = query.to_string();
+        self.rebuild_slint_model(window);
     }
 
     pub fn set_initial_tasks(&mut self, summaries: Vec<TaskSummary>, window: &MainWindow) {
         self.tasks.clear();
         self.id_order.clear();
 
-        let mut row_items = Vec::with_capacity(summaries.len());
         for summary in summaries {
             let file_type = extract_file_type(&summary.filename);
             let mut record = TaskModelRecord {
@@ -266,7 +353,6 @@ impl TaskStore {
             if record.speed_bps > 0 {
                 record.push_speed(record.speed_bps);
             }
-            row_items.push(record.to_row_data());
             self.id_order.push(summary.id);
             self.tasks.insert(summary.id, record);
         }
@@ -275,37 +361,45 @@ impl TaskStore {
             self.selected_task_id = Some(self.id_order[0]);
         }
 
-        self.slint_model.set_vec(row_items);
-        self.refresh_counts(window);
-        self.update_inspector(window);
+        self.rebuild_slint_model(window);
     }
 
     pub fn add_task(&mut self, record: TaskModelRecord, window: &MainWindow) {
         let id = record.id;
-        let row_data = record.to_row_data();
         self.tasks.insert(id, record);
         self.id_order.push(id);
-        self.slint_model.push(row_data);
         if self.selected_task_id.is_none() {
             self.selected_task_id = Some(id);
         }
-        self.refresh_counts(window);
-        self.update_inspector(window);
+        self.rebuild_slint_model(window);
+    }
+
+    pub fn find_row_index_in_model(&self, id: i64) -> Option<usize> {
+        find_row_index(&self.slint_model, id)
     }
 
     pub fn apply_telemetry(&mut self, snapshot: &TelemetrySnapshot, window: &MainWindow) {
+        let mut filter_membership_changed = false;
+
         for p in &snapshot.tasks {
             if let Some(record) = self.tasks.get_mut(&p.task_id) {
+                let old_status = record.status;
                 record.downloaded_bytes = p.downloaded_bytes;
                 record.speed_bps = p.speed_bps;
                 record.status = p.status;
                 record.push_speed(p.speed_bps);
 
-                if let Some(pos) = self.id_order.iter().position(|id| *id == p.task_id) {
-                    self.slint_model.set_row_data(pos, record.to_row_data());
+                if old_status != p.status {
+                    filter_membership_changed = true;
+                }
+
+                let row_data = record.to_row_data();
+                if let Some(pos) = find_row_index(&self.slint_model, p.task_id) {
+                    self.slint_model.set_row_data(pos, row_data);
                 }
             } else {
                 self.add_or_update_from_progress(p);
+                filter_membership_changed = true;
             }
         }
 
@@ -314,8 +408,12 @@ impl TaskStore {
         )));
         window.set_aggregate_upload_speed(SharedString::from("0.0 B/s"));
 
-        self.refresh_counts(window);
-        self.update_inspector(window);
+        if filter_membership_changed {
+            self.rebuild_slint_model(window);
+        } else {
+            self.refresh_counts(window);
+            self.update_inspector(window);
+        }
     }
 
     fn add_or_update_from_progress(&mut self, p: &TaskProgress) {
@@ -332,7 +430,6 @@ impl TaskStore {
         record.status = p.status;
         record.push_speed(p.speed_bps);
 
-        self.slint_model.push(record.to_row_data());
         self.id_order.push(p.task_id);
         self.tasks.insert(p.task_id, record);
     }
@@ -340,8 +437,9 @@ impl TaskStore {
     pub fn toggle_selection(&mut self, id: i64, window: &MainWindow) {
         if let Some(record) = self.tasks.get_mut(&id) {
             record.is_selected = !record.is_selected;
-            if let Some(pos) = self.id_order.iter().position(|item_id| *item_id == id) {
-                self.slint_model.set_row_data(pos, record.to_row_data());
+            let row_data = record.to_row_data();
+            if let Some(pos) = find_row_index(&self.slint_model, id) {
+                self.slint_model.set_row_data(pos, row_data);
             }
         }
         self.selected_task_id = Some(id);
@@ -356,11 +454,14 @@ impl TaskStore {
     }
 
     pub fn deselect_all(&mut self, window: &MainWindow) {
-        for (i, id) in self.id_order.iter().enumerate() {
-            if let Some(record) = self.tasks.get_mut(id) {
-                if record.is_selected {
-                    record.is_selected = false;
-                    self.slint_model.set_row_data(i, record.to_row_data());
+        for record in self.tasks.values_mut() {
+            record.is_selected = false;
+        }
+        for i in 0..self.slint_model.row_count() {
+            if let Some(mut row) = self.slint_model.row_data(i) {
+                if row.is_selected {
+                    row.is_selected = false;
+                    self.slint_model.set_row_data(i, row);
                 }
             }
         }
@@ -371,12 +472,10 @@ impl TaskStore {
         if let Some(pos) = self.id_order.iter().position(|item_id| *item_id == id) {
             self.id_order.remove(pos);
             self.tasks.remove(&id);
-            self.slint_model.remove(pos);
             if self.selected_task_id == Some(id) {
                 self.selected_task_id = self.id_order.first().copied();
             }
-            self.refresh_counts(window);
-            self.update_inspector(window);
+            self.rebuild_slint_model(window);
         }
     }
 
