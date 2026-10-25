@@ -34,6 +34,10 @@ pub struct ActiveTaskSession {
 
 pub fn detect_stream_protocol(url: &str, mime_type: Option<&str>) -> Option<&'static str> {
     let url_lower = url.to_lowercase();
+    if url_lower.starts_with("magnet:?") {
+        return Some("bittorrent");
+    }
+
     let url_path = url_lower
         .split('?')
         .next()
@@ -42,6 +46,9 @@ pub fn detect_stream_protocol(url: &str, mime_type: Option<&str>) -> Option<&'st
         .next()
         .unwrap_or("");
 
+    if url_path.ends_with(".torrent") {
+        return Some("bittorrent");
+    }
     if url_path.ends_with(".m3u8") || url_lower.contains(".m3u8?") || url_lower.contains(".m3u8#") {
         return Some("hls");
     }
@@ -51,6 +58,9 @@ pub fn detect_stream_protocol(url: &str, mime_type: Option<&str>) -> Option<&'st
 
     if let Some(mime) = mime_type {
         let mime_lower = mime.to_lowercase();
+        if mime_lower.contains("x-bittorrent") {
+            return Some("bittorrent");
+        }
         if mime_lower.contains("vnd.apple.mpegurl") || mime_lower.contains("x-mpegurl") {
             return Some("hls");
         }
@@ -117,13 +127,28 @@ impl TaskController {
         session_context: Option<SessionContext>,
     ) -> Result<TaskRecord, DaemonError> {
         let context = session_context.unwrap_or_default();
-        let probe_res = self
-            .transport
-            .probe(url, &context)
-            .await
-            .map_err(|e| DaemonError::Internal(format!("Probe failed: {}", e)))?;
+        let initial_proto = detect_stream_protocol(url, None);
+        let (probe_res, detected_protocol) = if initial_proto == Some("bittorrent") {
+            (
+                fetchtrek_core::ProbeResult {
+                    supports_ranges: false,
+                    total_bytes: None,
+                    etag: None,
+                    mime_type: Some("application/x-bittorrent".into()),
+                    suggested_filename: None,
+                },
+                Some("bittorrent"),
+            )
+        } else {
+            let probe = self
+                .transport
+                .probe(url, &context)
+                .await
+                .map_err(|e| DaemonError::Internal(format!("Probe failed: {}", e)))?;
+            let proto = detect_stream_protocol(url, probe.mime_type.as_deref());
+            (probe, proto)
+        };
 
-        let detected_protocol = detect_stream_protocol(url, probe_res.mime_type.as_deref());
         let (total_bytes, protocol_str) = match detected_protocol {
             Some(p) => (0u64, p),
             None => (probe_res.total_bytes.unwrap_or(0), "http"),
@@ -133,6 +158,14 @@ impl TaskController {
             .map(|s| s.to_string())
             .or(probe_res.suggested_filename)
             .unwrap_or_else(|| {
+                if url.starts_with("magnet:?") {
+                    if let Ok(magnet) = fetchtrek_protocols::MagnetLink::parse(url) {
+                        if let Some(dn) = magnet.display_name {
+                            return dn;
+                        }
+                    }
+                    return "torrent_download".to_string();
+                }
                 url.split('/')
                     .next_back()
                     .filter(|s| !s.is_empty())
@@ -313,6 +346,37 @@ impl TaskController {
                     &self_clone,
                     task.clone(),
                     Arc::clone(&task_context),
+                    cancel_rx,
+                    Arc::clone(&downloaded_bytes),
+                    Arc::clone(&speed_bps),
+                    Arc::clone(&active_connections),
+                );
+
+                let session = ActiveTaskSession {
+                    task_id,
+                    uuid: task.uuid,
+                    cancel_tx,
+                    downloaded_bytes,
+                    speed_bps,
+                    active_connections,
+                    context: task_context,
+                    join_handle: Some(join_handle),
+                };
+
+                self_clone
+                    .active_sessions
+                    .write()
+                    .await
+                    .insert(task_id, session);
+
+                return Ok(());
+            }
+
+            // BitTorrent session routing
+            if task.protocol == "bittorrent" {
+                let join_handle = crate::torrent_controller::start_torrent_download(
+                    &self_clone,
+                    task.clone(),
                     cancel_rx,
                     Arc::clone(&downloaded_bytes),
                     Arc::clone(&speed_bps),
