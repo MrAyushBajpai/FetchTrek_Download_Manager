@@ -11,26 +11,28 @@ export enum TaskDisplayStatus {
 export component StatusPill inherits Rectangle {
     in property <TaskDisplayStatus> status: TaskDisplayStatus.Downloading;
 
+    height: 22px;
     border-radius: 4px;
     border-width: 1px;
 
-    background: root.status == TaskDisplayStatus.Downloading ? DesignTokens.primary-blue.with-alpha(0.15) :
-                root.status == TaskDisplayStatus.Queued ? DesignTokens.status-amber.with-alpha(0.15) :
-                root.status == TaskDisplayStatus.Paused ? DesignTokens.status-yellow.with-alpha(0.15) :
-                root.status == TaskDisplayStatus.Completed ? DesignTokens.status-green.with-alpha(0.15) :
-                DesignTokens.status-red.with-alpha(0.15);
+    background: root.status == TaskDisplayStatus.Downloading ? DesignTokens.primary-blue.with-alpha(0.12) :
+                root.status == TaskDisplayStatus.Queued ? DesignTokens.status-amber.with-alpha(0.12) :
+                root.status == TaskDisplayStatus.Paused ? DesignTokens.status-yellow.with-alpha(0.12) :
+                root.status == TaskDisplayStatus.Completed ? DesignTokens.status-green.with-alpha(0.12) :
+                DesignTokens.status-red.with-alpha(0.12);
 
-    border-color: root.status == TaskDisplayStatus.Downloading ? DesignTokens.primary-blue.with-alpha(0.3) :
-                  root.status == TaskDisplayStatus.Queued ? DesignTokens.status-amber.with-alpha(0.3) :
-                  root.status == TaskDisplayStatus.Paused ? DesignTokens.status-yellow.with-alpha(0.3) :
-                  root.status == TaskDisplayStatus.Completed ? DesignTokens.status-green.with-alpha(0.3) :
-                  DesignTokens.status-red.with-alpha(0.3);
+    border-color: root.status == TaskDisplayStatus.Downloading ? DesignTokens.primary-blue.with-alpha(0.28) :
+                  root.status == TaskDisplayStatus.Queued ? DesignTokens.status-amber.with-alpha(0.28) :
+                  root.status == TaskDisplayStatus.Paused ? DesignTokens.status-yellow.with-alpha(0.28) :
+                  root.status == TaskDisplayStatus.Completed ? DesignTokens.status-green.with-alpha(0.28) :
+                  DesignTokens.status-red.with-alpha(0.28);
 
     HorizontalLayout {
         padding-left: 8px;
         padding-right: 8px;
-        padding-top: 2px;
-        padding-bottom: 2px;
+        padding-top: 3px;
+        padding-bottom: 3px;
+        alignment: center;
 
         Text {
             text: root.status == TaskDisplayStatus.Downloading ? "DOWNLOADING" :
@@ -39,12 +41,13 @@ export component StatusPill inherits Rectangle {
                   root.status == TaskDisplayStatus.Completed ? "COMPLETED" : "FAILED";
             font-size: 10px;
             font-weight: 700;
-            letter-spacing: 0.4px;
             color: root.status == TaskDisplayStatus.Downloading ? DesignTokens.primary-blue :
                    root.status == TaskDisplayStatus.Queued ? DesignTokens.status-amber :
                    root.status == TaskDisplayStatus.Paused ? DesignTokens.status-yellow :
                    root.status == TaskDisplayStatus.Completed ? DesignTokens.status-green :
                    DesignTokens.status-red;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 }

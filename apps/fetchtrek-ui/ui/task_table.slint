@@ -34,7 +34,9 @@ component RowActionButton inherits Rectangle {
     Text {
         text: root.icon;
         font-size: 11px;
-        color: btn_touch.has-hover ? DesignTokens.text-primary : root.icon_color;
+        font-family: "Segoe UI Symbol";
+        font-weight: 700;
+        color: btn_touch.has-hover ? (root.icon == "✕" ? DesignTokens.status-red : DesignTokens.text-primary) : root.icon_color;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -103,15 +105,16 @@ component TaskTableRow inherits Rectangle {
             }
         }
 
-        // 2. Filename & Type Icon (flex 2.5)
+        // 2. Filename & Type Icon (flex 1.0, min-width 220px)
         HorizontalLayout {
-            horizontal-stretch: 2.5;
+            horizontal-stretch: 1.0;
+            min-width: 220px;
             spacing: 8px;
 
             VerticalLayout {
                 alignment: center;
                 Rectangle {
-                    width: 26px;
+                    width: 28px;
                     height: 18px;
                     border-radius: 3px;
                     background: DesignTokens.surface-inset;
@@ -139,7 +142,7 @@ component TaskTableRow inherits Rectangle {
             }
         }
 
-        // 3. Total Size (90px)
+        // 3. Total Size (90px, right-aligned)
         Rectangle {
             width: 90px;
 
@@ -148,16 +151,18 @@ component TaskTableRow inherits Rectangle {
                 font-size: 11px;
                 font-family: "monospace";
                 color: DesignTokens.text-secondary;
+                horizontal-alignment: end;
                 vertical-alignment: center;
             }
         }
 
-        // 4. Progress Bar & Percent (flex 2.0)
+        // 4. Progress Bar & Percent (200px: flexible bar + 48px monospace label)
         HorizontalLayout {
-            horizontal-stretch: 2.0;
-            spacing: 8px;
+            width: 200px;
+            spacing: 10px;
 
             VerticalLayout {
+                horizontal-stretch: 1.0;
                 alignment: center;
                 SmoothProgressBar {
                     progress: root.data.progress;
@@ -169,7 +174,7 @@ component TaskTableRow inherits Rectangle {
             }
 
             Text {
-                width: 44px;
+                width: 48px;
                 text: root.data.progress_percent_formatted;
                 font-size: 11px;
                 font-family: "monospace";
@@ -179,19 +184,20 @@ component TaskTableRow inherits Rectangle {
             }
         }
 
-        // 5. Status Pill (110px)
-        VerticalLayout {
+        // 5. Status Pill (115px, centered)
+        HorizontalLayout {
+            width: 115px;
             alignment: center;
-            Rectangle {
-                width: 110px;
 
+            VerticalLayout {
+                alignment: center;
                 StatusPill {
                     status: root.data.status;
                 }
             }
         }
 
-        // 6. Speed (95px)
+        // 6. Speed (95px, right-aligned)
         Rectangle {
             width: 95px;
 
@@ -200,11 +206,12 @@ component TaskTableRow inherits Rectangle {
                 font-size: 11px;
                 font-family: "monospace";
                 color: root.data.speed_formatted == "--" ? DesignTokens.text-muted : DesignTokens.primary-blue;
+                horizontal-alignment: end;
                 vertical-alignment: center;
             }
         }
 
-        // 7. ETA (85px)
+        // 7. ETA (85px, right-aligned)
         Rectangle {
             width: 85px;
 
@@ -213,34 +220,33 @@ component TaskTableRow inherits Rectangle {
                 font-size: 11px;
                 font-family: "monospace";
                 color: root.data.eta_formatted == "--:--:--" ? DesignTokens.text-muted : DesignTokens.text-secondary;
+                horizontal-alignment: end;
                 vertical-alignment: center;
             }
         }
 
-        // 8. Row Actions (100px)
-        VerticalLayout {
+        // 8. Row Actions (100px, centered)
+        HorizontalLayout {
+            width: 100px;
             alignment: center;
-            HorizontalLayout {
-                width: 100px;
-                spacing: 4px;
-                alignment: end;
+            spacing: 6px;
 
-                RowActionButton {
-                    icon: root.data.status == TaskDisplayStatus.Downloading ? "⏸" : "▶";
-                    icon_color: root.data.status == TaskDisplayStatus.Downloading ? DesignTokens.status-yellow : DesignTokens.primary-blue;
-                    clicked => { root.toggle_pause_resume(); }
-                }
+            RowActionButton {
+                icon: root.data.status == TaskDisplayStatus.Downloading ? "❚❚" : "▶";
+                icon_color: root.data.status == TaskDisplayStatus.Downloading ? DesignTokens.status-yellow : DesignTokens.primary-blue;
+                clicked => { root.toggle_pause_resume(); }
+            }
 
-                RowActionButton {
-                    icon: "📁";
-                    clicked => { root.open_folder(); }
-                }
+            RowActionButton {
+                icon: "⌕";
+                icon_color: DesignTokens.text-secondary;
+                clicked => { root.open_folder(); }
+            }
 
-                RowActionButton {
-                    icon: "🗑";
-                    icon_color: DesignTokens.status-red;
-                    clicked => { root.delete_clicked(); }
-                }
+            RowActionButton {
+                icon: "✕";
+                icon_color: DesignTokens.text-muted;
+                clicked => { root.delete_clicked(); }
             }
         }
     }
@@ -313,7 +319,7 @@ export component TaskTable inherits Rectangle {
                                     text: "▶ Resume";
                                     font-size: 11px;
                                     font-weight: 600;
-                                    color: DesignTokens.text-primary;
+                                    color: DesignTokens.primary-blue;
                                     vertical-alignment: center;
                                 }
                             }
@@ -337,10 +343,10 @@ export component TaskTable inherits Rectangle {
                                 alignment: center;
 
                                 Text {
-                                    text: "⏸ Pause";
+                                    text: "❚❚ Pause";
                                     font-size: 11px;
                                     font-weight: 600;
-                                    color: DesignTokens.text-primary;
+                                    color: DesignTokens.status-yellow;
                                     vertical-alignment: center;
                                 }
                             }
@@ -364,7 +370,7 @@ export component TaskTable inherits Rectangle {
                                 alignment: center;
 
                                 Text {
-                                    text: "🗑 Remove";
+                                    text: "✕ Remove";
                                     font-size: 11px;
                                     font-weight: 600;
                                     color: DesignTokens.status-red;
@@ -422,6 +428,7 @@ export component TaskTable inherits Rectangle {
                 padding-right: 12px;
                 spacing: 8px;
 
+                // Col 1: # (32px)
                 Rectangle {
                     width: 32px;
                     Text {
@@ -433,8 +440,10 @@ export component TaskTable inherits Rectangle {
                     }
                 }
 
+                // Col 2: FILENAME (flex 1.0, min-width 220px)
                 HorizontalLayout {
-                    horizontal-stretch: 2.5;
+                    horizontal-stretch: 1.0;
+                    min-width: 220px;
                     Text {
                         text: "FILENAME";
                         font-size: 10px;
@@ -445,6 +454,7 @@ export component TaskTable inherits Rectangle {
                     }
                 }
 
+                // Col 3: TOTAL SIZE (90px, right-aligned)
                 Rectangle {
                     width: 90px;
                     Text {
@@ -453,12 +463,14 @@ export component TaskTable inherits Rectangle {
                         font-weight: 700;
                         letter-spacing: 0.5px;
                         color: DesignTokens.text-muted;
+                        horizontal-alignment: end;
                         vertical-alignment: center;
                     }
                 }
 
-                HorizontalLayout {
-                    horizontal-stretch: 2.0;
+                // Col 4: PROGRESS (200px)
+                Rectangle {
+                    width: 200px;
                     Text {
                         text: "PROGRESS";
                         font-size: 10px;
@@ -469,18 +481,21 @@ export component TaskTable inherits Rectangle {
                     }
                 }
 
+                // Col 5: STATUS (115px, centered)
                 Rectangle {
-                    width: 110px;
+                    width: 115px;
                     Text {
                         text: "STATUS";
                         font-size: 10px;
                         font-weight: 700;
                         letter-spacing: 0.5px;
                         color: DesignTokens.text-muted;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                     }
                 }
 
+                // Col 6: SPEED (95px, right-aligned)
                 Rectangle {
                     width: 95px;
                     Text {
@@ -489,10 +504,12 @@ export component TaskTable inherits Rectangle {
                         font-weight: 700;
                         letter-spacing: 0.5px;
                         color: DesignTokens.text-muted;
+                        horizontal-alignment: end;
                         vertical-alignment: center;
                     }
                 }
 
+                // Col 7: ETA (85px, right-aligned)
                 Rectangle {
                     width: 85px;
                     Text {
@@ -501,10 +518,12 @@ export component TaskTable inherits Rectangle {
                         font-weight: 700;
                         letter-spacing: 0.5px;
                         color: DesignTokens.text-muted;
+                        horizontal-alignment: end;
                         vertical-alignment: center;
                     }
                 }
 
+                // Col 8: ACTIONS (100px, centered)
                 Rectangle {
                     width: 100px;
                     Text {
@@ -513,7 +532,7 @@ export component TaskTable inherits Rectangle {
                         font-weight: 700;
                         letter-spacing: 0.5px;
                         color: DesignTokens.text-muted;
-                        horizontal-alignment: end;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                     }
                 }
@@ -521,42 +540,13 @@ export component TaskTable inherits Rectangle {
         }
 
         // Virtualized Task Table Rows
-        if root.tasks.length > 0 : ListView {
-            for row[idx] in root.tasks : TaskTableRow {
-                data: row;
-                select_clicked => { root.row_selected(row.id); }
-                toggle_pause_resume => { root.row_toggle_pause_resume(row.id); }
-                open_folder => { root.row_open_folder(row.id); }
-                delete_clicked => { root.row_delete(row.id); }
-            }
-        }
-
-        // Empty State Placeholder
-        if root.tasks.length == 0 : Rectangle {
-            VerticalLayout {
-                alignment: center;
-                spacing: 12px;
-
-                Text {
-                    text: "📥";
-                    font-size: 32px;
-                    horizontal-alignment: center;
-                }
-
-                Text {
-                    text: "No Downloads Active";
-                    font-size: 16px;
-                    font-weight: 700;
-                    color: DesignTokens.text-primary;
-                    horizontal-alignment: center;
-                }
-
-                Text {
-                    text: "Click '+ Add URL' in the toolbar to initiate a download.";
-                    font-size: 12px;
-                    color: DesignTokens.text-secondary;
-                    horizontal-alignment: center;
-                }
+        ListView {
+            for task in root.tasks : TaskTableRow {
+                data: task;
+                select_clicked => { root.row_selected(task.id); }
+                toggle_pause_resume => { root.row_toggle_pause_resume(task.id); }
+                open_folder => { root.row_open_folder(task.id); }
+                delete_clicked => { root.row_delete(task.id); }
             }
         }
     }

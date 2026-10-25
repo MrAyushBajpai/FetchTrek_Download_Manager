@@ -19,6 +19,7 @@ export component MainWindow inherits Window {
     preferred-height: 800px;
     min-width: 960px;
     min-height: 600px;
+    default-font-family: "Segoe UI, Segoe UI Symbol, sans-serif";
     background: DesignTokens.surface-void;
 
     in-out property <[TaskRowData]> tasks;
@@ -117,6 +118,7 @@ export component MainWindow inherits Window {
 
             // Central Work Area: Table + Collapsible Inspector Drawer
             VerticalLayout {
+                horizontal-stretch: 1.0;
                 spacing: 0px;
 
                 TaskTable {

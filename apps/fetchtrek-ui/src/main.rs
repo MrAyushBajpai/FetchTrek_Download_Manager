@@ -162,6 +162,24 @@ fn main() -> Result<(), slint::PlatformError> {
         st.update_inspector(&main_window);
     });
 
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--show-add-modal") {
+        let cur_dest = initial_settings.default_download_path.clone();
+        main_window.set_add_form_data(AddTaskFormData {
+            url: "https://releases.ubuntu.com/24.04/ubuntu-24.04-desktop-amd64.iso".into(),
+            destination_path: cur_dest.into(),
+            filename: "ubuntu-24.04-desktop-amd64.iso".into(),
+            connections: 4,
+            referer: "".into(),
+            user_agent: "".into(),
+            cookies: "".into(),
+            store_in_vault: true,
+        });
+        main_window.set_show_add_modal(true);
+    } else if args.iter().any(|a| a == "--show-settings-modal") {
+        main_window.set_show_settings_modal(true);
+    }
+
     let bridge = ipc_bridge::start_ipc_bridge(main_window.as_weak());
 
     // Initialize System Tray

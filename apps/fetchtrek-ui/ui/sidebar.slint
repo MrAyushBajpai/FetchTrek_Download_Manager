@@ -39,6 +39,8 @@ component SidebarItem inherits Rectangle {
             Text {
                 text: root.icon;
                 font-size: 13px;
+                font-family: "Segoe UI Symbol";
+                font-weight: 700;
                 color: root.is_selected ? DesignTokens.primary-blue : DesignTokens.text-secondary;
                 vertical-alignment: center;
             }
@@ -113,7 +115,7 @@ export component Sidebar inherits Rectangle {
 
             SidebarItem {
                 text: "All Tasks";
-                icon: "📋";
+                icon: "≡";
                 badge_count: root.count_all;
                 badge_color: DesignTokens.text-secondary;
                 is_selected: root.selected_category == "All Tasks";
@@ -125,7 +127,7 @@ export component Sidebar inherits Rectangle {
 
             SidebarItem {
                 text: "Downloading";
-                icon: "⤓";
+                icon: "↓";
                 badge_count: root.count_downloading;
                 badge_color: DesignTokens.primary-blue;
                 is_selected: root.selected_category == "Downloading";
@@ -137,7 +139,7 @@ export component Sidebar inherits Rectangle {
 
             SidebarItem {
                 text: "Paused";
-                icon: "⏸";
+                icon: "❚❚";
                 badge_count: root.count_paused;
                 badge_color: DesignTokens.status-yellow;
                 is_selected: root.selected_category == "Paused";
@@ -161,7 +163,7 @@ export component Sidebar inherits Rectangle {
 
             SidebarItem {
                 text: "Failed";
-                icon: "✕";
+                icon: "!";
                 badge_count: root.count_failed;
                 badge_color: DesignTokens.status-red;
                 is_selected: root.selected_category == "Failed";
@@ -191,7 +193,7 @@ export component Sidebar inherits Rectangle {
 
             SidebarItem {
                 text: "Direct HTTP/S";
-                icon: "🌐";
+                icon: "↔";
                 is_selected: root.selected_category == "Direct HTTP/S";
                 clicked => {
                     root.selected_category = "Direct HTTP/S";
@@ -201,7 +203,7 @@ export component Sidebar inherits Rectangle {
 
             SidebarItem {
                 text: "Media Streams";
-                icon: "🎬";
+                icon: "▷";
                 is_selected: root.selected_category == "Media Streams";
                 clicked => {
                     root.selected_category = "Media Streams";
@@ -211,7 +213,7 @@ export component Sidebar inherits Rectangle {
 
             SidebarItem {
                 text: "BitTorrent";
-                icon: "🧲";
+                icon: "⋈";
                 is_selected: root.selected_category == "BitTorrent";
                 clicked => {
                     root.selected_category = "BitTorrent";
@@ -242,7 +244,7 @@ export component Sidebar inherits Rectangle {
                     height: 24px;
 
                     Text {
-                        text: "▼ " + root.download_speed + "  ▲ " + root.upload_speed;
+                        text: "↓ " + root.download_speed + "  ↑ " + root.upload_speed;
                         font-size: 11px;
                         font-weight: 600;
                         color: DesignTokens.text-primary;

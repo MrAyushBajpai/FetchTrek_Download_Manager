@@ -26,7 +26,8 @@ export component HeaderButton inherits Rectangle {
 
         if root.icon != "" : Text {
             text: root.icon;
-            font-size: 12px;
+            font-size: 11px;
+            font-weight: 700;
             color: root.is-primary ? #ffffff : DesignTokens.text-primary;
             vertical-alignment: center;
         }
@@ -82,7 +83,7 @@ export component HeaderBar inherits Rectangle {
                     background: DesignTokens.primary-blue;
 
                     Text {
-                        text: "⤓";
+                        text: "↓";
                         font-size: 16px;
                         font-weight: 800;
                         color: #ffffff;
@@ -143,8 +144,9 @@ export component HeaderBar inherits Rectangle {
                     spacing: 8px;
 
                     Text {
-                        text: "🔍";
-                        font-size: 11px;
+                        text: "⌕";
+                        font-size: 13px;
+                        font-weight: 700;
                         color: DesignTokens.text-muted;
                         vertical-alignment: center;
                     }
@@ -166,32 +168,6 @@ export component HeaderBar inherits Rectangle {
                             edited => {
                                 root.search_text = self.text;
                                 root.search_query_changed(self.text);
-                            }
-                        }
-                    }
-
-                    if search_input.text != "" : VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: 16px;
-                            height: 16px;
-                            border-radius: 8px;
-                            background: DesignTokens.surface-hover;
-
-                            Text {
-                                text: "✕";
-                                font-size: 9px;
-                                color: DesignTokens.text-secondary;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-
-                            TouchArea {
-                                clicked => {
-                                    search_input.text = "";
-                                    root.search_text = "";
-                                    root.search_query_changed("");
-                                }
                             }
                         }
                     }
@@ -220,7 +196,7 @@ export component HeaderBar inherits Rectangle {
                 }
 
                 HeaderButton {
-                    icon: "⏸";
+                    icon: "❚❚";
                     text: "Pause All";
                     clicked => { root.pause_all_clicked(); }
                 }
@@ -230,7 +206,8 @@ export component HeaderBar inherits Rectangle {
                     border-radius: 6px;
                     border-width: 1px;
                     border-color: DesignTokens.border-hairline;
-                    background: throttle_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+                    background: throttle_touch.pressed ? DesignTokens.surface-hover.darker(0.1) :
+                                throttle_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
 
                     throttle_touch := TouchArea {
                         clicked => {
@@ -246,8 +223,9 @@ export component HeaderBar inherits Rectangle {
                         alignment: center;
 
                         Text {
-                            text: root.is_throttled ? "⏱" : "⚡";
-                            font-size: 12px;
+                            text: "⚡";
+                            font-size: 11px;
+                            color: root.is_throttled ? DesignTokens.status-amber : DesignTokens.text-primary;
                             vertical-alignment: center;
                         }
 
@@ -267,7 +245,8 @@ export component HeaderBar inherits Rectangle {
                     border-radius: 6px;
                     border-width: 1px;
                     border-color: DesignTokens.border-hairline;
-                    background: settings_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
+                    background: settings_touch.pressed ? DesignTokens.surface-hover.darker(0.1) :
+                                settings_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
 
                     settings_touch := TouchArea {
                         clicked => { root.settings_clicked(); }
@@ -276,7 +255,7 @@ export component HeaderBar inherits Rectangle {
                     Text {
                         text: "⚙";
                         font-size: 14px;
-                        color: DesignTokens.text-secondary;
+                        color: settings_touch.has-hover ? DesignTokens.text-primary : DesignTokens.text-secondary;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }

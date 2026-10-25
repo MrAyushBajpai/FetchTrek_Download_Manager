@@ -100,15 +100,18 @@ export component Inspector inherits Rectangle {
                 padding-right: 16px;
                 alignment: space-between;
 
-                // Left: Document glyph + filename + size badge
+                // Left: File icon + filename + size badge
                 HorizontalLayout {
                     spacing: 8px;
+                    alignment: center;
 
                     VerticalLayout {
                         alignment: center;
                         Text {
-                            text: "📄";
+                            text: "≡";
                             font-size: 13px;
+                            font-weight: 700;
+                            color: DesignTokens.text-secondary;
                             vertical-alignment: center;
                         }
                     }
@@ -153,12 +156,13 @@ export component Inspector inherits Rectangle {
 
                 // Right: Connection count pill + Chevron toggle
                 HorizontalLayout {
-                    spacing: 12px;
+                    spacing: 8px;
+                    alignment: center;
 
                     if root.details.has_selection : VerticalLayout {
                         alignment: center;
                         Rectangle {
-                            height: 20px;
+                            height: 22px;
                             border-radius: 4px;
                             background: DesignTokens.surface-card;
                             border-width: 1px;
@@ -192,10 +196,10 @@ export component Inspector inherits Rectangle {
                             border-color: DesignTokens.border-hairline;
 
                             Text {
-                                text: root.is_expanded ? "∨" : "∧";
+                                text: root.is_expanded ? "▾" : "▴";
                                 font-size: 11px;
                                 font-weight: 700;
-                                color: DesignTokens.text-primary;
+                                color: DesignTokens.text-secondary;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -241,8 +245,11 @@ export component Inspector inherits Rectangle {
 
                     InspectorTile {
                         label: "STATUS";
-                        StatusPill {
-                            status: root.details.status;
+                        HorizontalLayout {
+                            alignment: start;
+                            StatusPill {
+                                status: root.details.status;
+                            }
                         }
                     }
 
@@ -370,9 +377,10 @@ export component Inspector inherits Rectangle {
                             VerticalLayout {
                                 alignment: center;
                                 Rectangle {
-                                    height: 24px;
-                                    border-radius: 4px;
-                                    background: folder_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-input;
+                                    height: 26px;
+                                    border-radius: 6px;
+                                    background: folder_touch.pressed ? DesignTokens.surface-hover.darker(0.1) :
+                                                folder_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-card;
                                     border-width: 1px;
                                     border-color: DesignTokens.border-hairline;
 
@@ -383,8 +391,8 @@ export component Inspector inherits Rectangle {
                                     }
 
                                     HorizontalLayout {
-                                        padding-left: 8px;
-                                        padding-right: 8px;
+                                        padding-left: 10px;
+                                        padding-right: 10px;
                                         alignment: center;
 
                                         Text {
@@ -406,7 +414,7 @@ export component Inspector inherits Rectangle {
                             VerticalLayout {
                                 alignment: center;
                                 Rectangle {
-                                    height: 24px;
+                                    height: 26px;
                                     border-radius: 4px;
                                     background: pause_touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-input;
                                     border-width: 1px;
@@ -424,7 +432,7 @@ export component Inspector inherits Rectangle {
                                         alignment: center;
 
                                         Text {
-                                            text: root.details.status == TaskDisplayStatus.Downloading ? "⏸ Pause" : "▶ Resume";
+                                            text: root.details.status == TaskDisplayStatus.Downloading ? "❚❚ Pause" : "▶ Resume";
                                             font-size: 11px;
                                             font-weight: 600;
                                             color: root.details.status == TaskDisplayStatus.Downloading ? DesignTokens.status-yellow : DesignTokens.primary-blue;
@@ -437,7 +445,7 @@ export component Inspector inherits Rectangle {
                             VerticalLayout {
                                 alignment: center;
                                 Rectangle {
-                                    height: 24px;
+                                    height: 26px;
                                     border-radius: 4px;
                                     background: cancel_touch.has-hover ? DesignTokens.status-red.with-alpha(0.2) : DesignTokens.surface-input;
                                     border-width: 1px;

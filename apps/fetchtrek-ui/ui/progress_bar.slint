@@ -12,6 +12,8 @@ export component SmoothProgressBar inherits Rectangle {
     clip: true;
 
     Rectangle {
+        x: 0px;
+        y: 0px;
         width: parent.width * Math.min(1.0, Math.max(0.0, root.progress));
         height: parent.height;
         background: root.fill-color;
