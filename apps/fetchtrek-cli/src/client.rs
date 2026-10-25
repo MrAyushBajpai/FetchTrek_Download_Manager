@@ -78,6 +78,10 @@ impl FetchTrekClient {
             destination_path: destination_path.map(String::from),
             filename: filename.map(String::from),
             connections,
+            headers: None,
+            cookies: None,
+            user_agent: None,
+            referer: None,
         };
         let resp = self.send_request(&req).await?;
         match resp {

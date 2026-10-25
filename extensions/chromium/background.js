@@ -1,6 +1,7 @@
 import { getSettings } from "./storage.js";
 import { shouldIntercept, extractDownloadMetadata } from "./interceptor.js";
 import { sendToHost, checkHostHealth } from "./native_client.js";
+import { buildSessionPayload } from "./session.js";
 
 function setBadge(text, color) {
   if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
@@ -63,13 +64,17 @@ if (typeof chrome !== "undefined" && chrome.downloads?.onCreated) {
       }
 
       const meta = extractDownloadMetadata(item);
+      const session = await buildSessionPayload(item);
+
       const payload = {
         action: "intercept_download",
         url: meta.url,
         filename: meta.filename,
         destination_path: null,
-        headers: meta.referrer ? { Referer: meta.referrer } : {},
-        cookies: null,
+        headers: session.headers,
+        cookies: session.cookies,
+        user_agent: session.user_agent,
+        referer: session.referer,
         connections: 4
       };
 

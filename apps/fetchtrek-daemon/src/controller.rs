@@ -28,6 +28,7 @@ pub struct ActiveTaskSession {
     pub downloaded_bytes: Arc<AtomicU64>,
     pub speed_bps: Arc<AtomicU64>,
     pub active_connections: Arc<AtomicU16>,
+    pub context: Arc<SessionContext>,
     pub join_handle: Option<JoinHandle<Result<(), DaemonError>>>,
 }
 
@@ -38,6 +39,7 @@ pub struct TaskController {
     pub limiter: Arc<BandwidthLimiter>,
     pub transport: Arc<dyn NetworkTransport>,
     pub active_sessions: Arc<RwLock<HashMap<i64, ActiveTaskSession>>>,
+    pub task_contexts: Arc<RwLock<HashMap<i64, Arc<SessionContext>>>>,
     pub max_concurrent_tasks: usize,
     pub default_download_dir: PathBuf,
 }
@@ -59,6 +61,7 @@ impl TaskController {
             limiter,
             transport,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
+            task_contexts: Arc::new(RwLock::new(HashMap::new())),
             max_concurrent_tasks,
             default_download_dir,
         }
@@ -70,8 +73,9 @@ impl TaskController {
         destination_path: Option<&str>,
         filename: Option<&str>,
         connections: Option<usize>,
+        session_context: Option<SessionContext>,
     ) -> Result<TaskRecord, DaemonError> {
-        let context = SessionContext::default();
+        let context = session_context.unwrap_or_default();
         let probe_res = self
             .transport
             .probe(url, &context)
@@ -121,6 +125,11 @@ impl TaskController {
                 .map_err(|e| DaemonError::Internal(e.to_string()))?;
             db.create_task(&new_task)?
         };
+
+        self.task_contexts
+            .write()
+            .await
+            .insert(task_id, Arc::new(context));
 
         // Pre-create initial segments
         let num_connections = connections.unwrap_or(4).max(1);
@@ -234,6 +243,13 @@ impl TaskController {
             }
 
             // 4. Session channels and metrics
+            let task_context = self_clone
+                .task_contexts
+                .read()
+                .await
+                .get(&task_id)
+                .cloned()
+                .unwrap_or_else(|| Arc::new(SessionContext::default()));
             let (cancel_tx, cancel_rx) = watch::channel(false);
             let downloaded_bytes = Arc::new(AtomicU64::new(task.downloaded_bytes));
             let speed_bps = Arc::new(AtomicU64::new(0));
@@ -263,6 +279,7 @@ impl TaskController {
             let active_conns_clone = Arc::clone(&active_connections);
             let cancel_rx_task = cancel_rx.clone();
             let cursors_for_workers = active_cursors.clone();
+            let context_for_session = Arc::clone(&task_context);
 
             let join_handle = tokio::spawn(async move {
                 let mut worker_handles = Vec::with_capacity(cursors_for_workers.len());
@@ -284,6 +301,7 @@ impl TaskController {
                     let mut cancel_rx_worker = cancel_rx_task.clone();
                     let url = url_clone.clone();
                     let dest = dest_clone.clone();
+                    let worker_context = Arc::clone(&context_for_session);
 
                     let worker_handle = tokio::spawn(async move {
                         struct ConnGuard(Arc<AtomicU16>);
@@ -302,9 +320,8 @@ impl TaskController {
                         }
 
                         let stream_range = ByteRange::new(start_pos, end_pos);
-                        let context = SessionContext::default();
                         let mut stream = match transport
-                            .open_range_stream(&url, stream_range, &context)
+                            .open_range_stream(&url, stream_range, &worker_context)
                             .await
                         {
                             Ok(s) => s,
@@ -540,6 +557,7 @@ impl TaskController {
                 downloaded_bytes,
                 speed_bps,
                 active_connections,
+                context: task_context,
                 join_handle: Some(join_handle),
             };
 
@@ -616,6 +634,7 @@ impl TaskController {
             let mut sessions = self.active_sessions.write().await;
             sessions.remove(&task_id)
         };
+        self.task_contexts.write().await.remove(&task_id);
 
         if let Some(session) = session {
             let _ = session.cancel_tx.send(true);

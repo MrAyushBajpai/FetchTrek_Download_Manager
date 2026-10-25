@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fetchtrek_core::{BandwidthLimiter, NetworkTransport};
+use fetchtrek_core::{BandwidthLimiter, NetworkTransport, SessionContext};
 use fetchtrek_ipc::{
     decode_request, default_endpoint, encode_response, encode_telemetry, read_frame, write_frame,
     IpcFrame, IpcRequest, IpcResponse, IpcServer, IpcStream, TaskSummary, TelemetryBroadcaster,
@@ -336,9 +336,29 @@ async fn dispatch_ipc_frame(engine: &DaemonEngine, frame: &IpcFrame) -> IpcFrame
                 destination_path,
                 filename,
                 connections,
+                headers,
+                cookies,
+                user_agent,
+                referer,
             },
             corr,
         )) => {
+            let session_ctx = if headers.is_some()
+                || cookies.is_some()
+                || user_agent.is_some()
+                || referer.is_some()
+            {
+                let mut ctx = SessionContext::new();
+                if let Some(h) = headers {
+                    ctx.headers = h;
+                }
+                ctx.cookies = cookies;
+                ctx.user_agent = user_agent;
+                ctx.referer = referer;
+                Some(ctx)
+            } else {
+                None
+            };
             match engine
                 .controller
                 .add_task(
@@ -346,6 +366,7 @@ async fn dispatch_ipc_frame(engine: &DaemonEngine, frame: &IpcFrame) -> IpcFrame
                     destination_path.as_deref(),
                     filename.as_deref(),
                     connections,
+                    session_ctx,
                 )
                 .await
             {

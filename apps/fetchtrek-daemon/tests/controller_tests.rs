@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use fetchtrek_core::BandwidthLimiter;
+use fetchtrek_core::{BandwidthLimiter, SessionContext};
 use fetchtrek_daemon::TaskController;
 use fetchtrek_persistence::Database;
 use fetchtrek_protocols::HttpTransport;
@@ -42,6 +42,21 @@ async fn start_mock_http_server(
     payload: Arc<Vec<u8>>,
     chunk_delay_ms: u64,
 ) -> (String, oneshot::Sender<()>) {
+    start_mock_http_server_inner(payload, chunk_delay_ms, None).await
+}
+
+async fn start_mock_http_server_capturing(
+    payload: Arc<Vec<u8>>,
+    captured_requests: Arc<tokio::sync::Mutex<Vec<String>>>,
+) -> (String, oneshot::Sender<()>) {
+    start_mock_http_server_inner(payload, 0, Some(captured_requests)).await
+}
+
+async fn start_mock_http_server_inner(
+    payload: Arc<Vec<u8>>,
+    chunk_delay_ms: u64,
+    captures: Option<Arc<tokio::sync::Mutex<Vec<String>>>>,
+) -> (String, oneshot::Sender<()>) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind mock server");
@@ -56,6 +71,7 @@ async fn start_mock_http_server(
                 _ = &mut shutdown_rx => break,
                 Ok((mut socket, _)) = listener.accept() => {
                     let payload = Arc::clone(&payload);
+                    let captures_clone = captures.as_ref().map(Arc::clone);
                     tokio::spawn(async move {
                         use tokio::io::{AsyncReadExt, AsyncWriteExt};
                         let mut buf = vec![0u8; 4096];
@@ -64,6 +80,9 @@ async fn start_mock_http_server(
                             _ => return,
                         };
                         let req = String::from_utf8_lossy(&buf[..n]);
+                        if let Some(caps) = &captures_clone {
+                            caps.lock().await.push(req.to_string());
+                        }
                         let first_line = req.lines().next().unwrap_or("");
                         let parts: Vec<&str> = first_line.split_whitespace().collect();
                         if parts.is_empty() {
@@ -176,6 +195,7 @@ async fn test_controller_e2e_download() {
             Some(&target_dest.to_string_lossy()),
             Some("e2e_output.bin"),
             Some(4),
+            None,
         )
         .await
         .expect("add_task failed");
@@ -230,6 +250,7 @@ async fn test_controller_pause_and_resumption() {
             Some(&target_dest.to_string_lossy()),
             Some("pause_resume.bin"),
             Some(4),
+            None,
         )
         .await
         .expect("add_task failed");
@@ -318,6 +339,7 @@ async fn test_controller_concurrency_queueing() {
                 Some(&dest.to_string_lossy()),
                 Some(&format!("task_{}.bin", i)),
                 Some(1),
+                None,
             )
             .await
             .expect("add_task failed");
@@ -378,6 +400,7 @@ async fn test_controller_telemetry_accuracy() {
             Some(&dest.to_string_lossy()),
             Some("telemetry.bin"),
             Some(2),
+            None,
         )
         .await
         .expect("add_task failed");
@@ -406,5 +429,104 @@ async fn test_controller_telemetry_accuracy() {
     assert!(
         saw_active_telemetry,
         "Expected telemetry snapshot to report live active download metrics"
+    );
+}
+
+#[tokio::test]
+async fn test_controller_session_context_forwarding() {
+    const PAYLOAD_SIZE: usize = 64 * 1024;
+    let payload: Arc<Vec<u8>> = Arc::new(vec![0xAA; PAYLOAD_SIZE]);
+    let captured_requests = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+
+    let (server_url, _server_stop) =
+        start_mock_http_server_capturing(Arc::clone(&payload), Arc::clone(&captured_requests))
+            .await;
+    let temp_dir = TempDirGuard::new("session_context_forwarding");
+    let controller = create_test_controller(&temp_dir, 5);
+
+    let target_dest = temp_dir.path.join("context_test.bin");
+    let mut session_ctx = SessionContext::new();
+    session_ctx.cookies = Some("sid=test_session_token_123; role=tester".to_string());
+    session_ctx.user_agent = Some("FetchTrek-TestRunner/1.0".to_string());
+    session_ctx.referer = Some("https://test.example.com/downloads".to_string());
+    session_ctx.headers.push((
+        "X-Custom-Auth".to_string(),
+        "Bearer custom-token-abc".to_string(),
+    ));
+
+    let task_record = controller
+        .add_task(
+            &format!("{}/file.bin", server_url),
+            Some(&target_dest.to_string_lossy()),
+            Some("context_test.bin"),
+            Some(2),
+            Some(session_ctx),
+        )
+        .await
+        .expect("add_task with session context failed");
+
+    // Wait for completion
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let task = controller
+            .database
+            .lock()
+            .unwrap()
+            .get_task_by_id(task_record.id)
+            .unwrap()
+            .expect("task not found");
+
+        if task.status == TaskState::Completed {
+            break;
+        }
+
+        assert!(Instant::now() < deadline, "Download timed out");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // Inspect captured HTTP requests
+    let requests = captured_requests.lock().await;
+    assert!(
+        !requests.is_empty(),
+        "Server should have received at least one HTTP request"
+    );
+
+    // Verify all session context components were forwarded in the HTTP headers
+    let any_has_cookie = requests.iter().any(|r| {
+        r.to_ascii_lowercase()
+            .contains("cookie: sid=test_session_token_123; role=tester")
+    });
+    let any_has_ua = requests.iter().any(|r| {
+        r.to_ascii_lowercase()
+            .contains("user-agent: fetchtrek-testrunner/1.0")
+    });
+    let any_has_ref = requests.iter().any(|r| {
+        r.to_ascii_lowercase()
+            .contains("referer: https://test.example.com/downloads")
+    });
+    let any_has_custom = requests.iter().any(|r| {
+        r.to_ascii_lowercase()
+            .contains("x-custom-auth: bearer custom-token-abc")
+    });
+
+    assert!(
+        any_has_cookie,
+        "Expected Cookie header in captured HTTP requests: {:?}",
+        *requests
+    );
+    assert!(
+        any_has_ua,
+        "Expected User-Agent header in captured HTTP requests: {:?}",
+        *requests
+    );
+    assert!(
+        any_has_ref,
+        "Expected Referer header in captured HTTP requests: {:?}",
+        *requests
+    );
+    assert!(
+        any_has_custom,
+        "Expected custom X-Custom-Auth header in captured HTTP requests: {:?}",
+        *requests
     );
 }

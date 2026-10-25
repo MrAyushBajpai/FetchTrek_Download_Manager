@@ -17,6 +17,10 @@ pub enum BrowserRequest {
         #[serde(default)]
         cookies: Option<String>,
         #[serde(default)]
+        user_agent: Option<String>,
+        #[serde(default)]
+        referer: Option<String>,
+        #[serde(default)]
         connections: Option<usize>,
     },
     QueryStatus {

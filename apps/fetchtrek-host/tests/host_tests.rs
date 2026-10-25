@@ -90,6 +90,7 @@ async fn test_json_deserialization_of_browser_requests() {
             headers,
             cookies,
             connections,
+            ..
         } => {
             assert_eq!(url, "https://example.com/archive.tar.gz");
             assert_eq!(filename.as_deref(), Some("archive.tar.gz"));
@@ -281,6 +282,8 @@ async fn test_mock_loopback_relay() {
         destination_path: None,
         headers: None,
         cookies: None,
+        user_agent: None,
+        referer: None,
         connections: Some(8),
     };
     let add_resp = relay.dispatch(add_req).await;
@@ -317,9 +320,81 @@ async fn test_daemon_offline_graceful_handling() {
         destination_path: None,
         headers: None,
         cookies: None,
+        user_agent: None,
+        referer: None,
         connections: None,
     };
 
     let resp = relay.dispatch(req).await;
     assert_eq!(resp, HostResponse::error("Daemon connection offline"));
+}
+
+#[tokio::test]
+async fn test_relay_session_context_forwarding() {
+    let endpoint = endpoint_with_name("fetchtrek_test_session_forwarding");
+    let mut server = IpcServer::bind(&endpoint).expect("bind mock IPC server");
+
+    let server_handle = tokio::spawn(async move {
+        let mut stream = server.accept().await.expect("accept connection");
+        if let Ok(frame) = stream.read_frame().await {
+            let (req, corr_id) = decode_request(&frame).expect("decode request");
+            match req {
+                IpcRequest::AddTask {
+                    url,
+                    headers,
+                    cookies,
+                    user_agent,
+                    referer,
+                    ..
+                } => {
+                    assert_eq!(url, "https://protected.example.com/data.bin");
+                    assert_eq!(
+                        cookies.as_deref(),
+                        Some("session_id=secret123; cf_clearance=tok999")
+                    );
+                    assert_eq!(user_agent.as_deref(), Some("Mozilla/5.0 Chrome/130"));
+                    assert_eq!(referer.as_deref(), Some("https://portal.example.com"));
+                    let h = headers.expect("headers must be forwarded");
+                    assert!(h
+                        .iter()
+                        .any(|(k, v)| k == "User-Agent" && v == "Mozilla/5.0 Chrome/130"));
+
+                    let resp = IpcResponse::TaskCreated {
+                        task_id: 202,
+                        uuid: "uuid-session-789".into(),
+                    };
+                    let resp_frame = encode_response(&resp, corr_id).expect("encode response");
+                    stream.write_frame(&resp_frame).await.expect("write frame");
+                }
+                other => panic!("Unexpected request: {other:?}"),
+            }
+        }
+    });
+
+    let mut relay = HostRelay::new(endpoint);
+    let mut headers = std::collections::HashMap::new();
+    headers.insert(
+        "User-Agent".to_string(),
+        "Mozilla/5.0 Chrome/130".to_string(),
+    );
+    headers.insert(
+        "Referer".to_string(),
+        "https://portal.example.com".to_string(),
+    );
+
+    let req = BrowserRequest::InterceptDownload {
+        url: "https://protected.example.com/data.bin".into(),
+        filename: Some("data.bin".into()),
+        destination_path: None,
+        headers: Some(headers),
+        cookies: Some("session_id=secret123; cf_clearance=tok999".into()),
+        user_agent: None,
+        referer: None,
+        connections: Some(4),
+    };
+
+    let resp = relay.dispatch(req).await;
+    assert_eq!(resp, HostResponse::task_created(202, "uuid-session-789"));
+
+    server_handle.abort();
 }

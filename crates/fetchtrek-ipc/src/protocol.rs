@@ -46,6 +46,14 @@ pub enum IpcRequest {
         destination_path: Option<String>,
         filename: Option<String>,
         connections: Option<usize>,
+        #[serde(default)]
+        headers: Option<Vec<(String, String)>>,
+        #[serde(default)]
+        cookies: Option<String>,
+        #[serde(default)]
+        user_agent: Option<String>,
+        #[serde(default)]
+        referer: Option<String>,
     },
     PauseTask {
         task_id: i64,

@@ -14,6 +14,10 @@ fn test_rpc_codec_round_trip() {
             destination_path: Some("/downloads/file.zip".to_string()),
             filename: Some("file.zip".to_string()),
             connections: Some(8),
+            headers: Some(vec![("Referer".into(), "https://example.com".into())]),
+            cookies: Some("session=123".into()),
+            user_agent: Some("FetchTrek/1.0".into()),
+            referer: Some("https://example.com".into()),
         },
         IpcRequest::PauseTask { task_id: 101 },
         IpcRequest::ResumeTask { task_id: 102 },
@@ -180,4 +184,42 @@ fn test_heartbeat_watchdog_timeout() {
     // At t = 6,000ms: watchdog timeout triggers
     assert!(tracker.is_timed_out(6_000));
     assert!(tracker.is_timed_out(6_001));
+}
+
+#[test]
+fn test_add_task_session_context_backward_compatibility() {
+    // 1. Without session context (None for all optional fields)
+    let req_plain = IpcRequest::AddTask {
+        url: "https://example.com/plain.zip".to_string(),
+        destination_path: None,
+        filename: None,
+        connections: None,
+        headers: None,
+        cookies: None,
+        user_agent: None,
+        referer: None,
+    };
+    let frame_plain = encode_request(&req_plain, 42).expect("encode plain");
+    let (decoded_plain, corr_plain) = decode_request(&frame_plain).expect("decode plain");
+    assert_eq!(corr_plain, 42);
+    assert_eq!(decoded_plain, req_plain);
+
+    // 2. With rich session context
+    let req_session = IpcRequest::AddTask {
+        url: "https://example.com/protected.zip".to_string(),
+        destination_path: Some("/dest/file.zip".into()),
+        filename: Some("file.zip".into()),
+        connections: Some(16),
+        headers: Some(vec![
+            ("User-Agent".into(), "Custom/1.0".into()),
+            ("Referer".into(), "https://portal.example.com".into()),
+        ]),
+        cookies: Some("session_id=abc; cf_clearance=xyz".into()),
+        user_agent: Some("Custom/1.0".into()),
+        referer: Some("https://portal.example.com".into()),
+    };
+    let frame_session = encode_request(&req_session, 43).expect("encode session");
+    let (decoded_session, corr_session) = decode_request(&frame_session).expect("decode session");
+    assert_eq!(corr_session, 43);
+    assert_eq!(decoded_session, req_session);
 }

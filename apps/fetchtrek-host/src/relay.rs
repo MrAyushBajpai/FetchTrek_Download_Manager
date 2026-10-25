@@ -123,15 +123,27 @@ impl HostRelay {
                 url,
                 filename,
                 destination_path,
-                headers: _,
-                cookies: _,
+                headers,
+                cookies,
+                user_agent,
+                referer,
                 connections,
             } => {
+                let resolved_ua = user_agent
+                    .or_else(|| headers.as_ref().and_then(|h| h.get("User-Agent").cloned()));
+                let resolved_ref =
+                    referer.or_else(|| headers.as_ref().and_then(|h| h.get("Referer").cloned()));
+                let headers_vec = headers.map(|h| h.into_iter().collect::<Vec<_>>());
+
                 let ipc_req = IpcRequest::AddTask {
                     url,
                     destination_path,
                     filename,
                     connections,
+                    headers: headers_vec,
+                    cookies,
+                    user_agent: resolved_ua,
+                    referer: resolved_ref,
                 };
                 match self.send_request(&ipc_req).await {
                     Ok(IpcResponse::TaskCreated { task_id, uuid }) => {
