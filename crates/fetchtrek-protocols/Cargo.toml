@@ -6,7 +6,7 @@ edition = "2021"
 [features]
 default = ["http", "media"]
 http = ["dep:reqwest", "dep:tokio-util", "dep:futures-util"]
-media = ["http", "dep:quick-xml"]
+media = ["http", "dep:quick-xml", "dep:aes", "dep:cbc"]
 
 [dependencies]
 fetchtrek-types = { path = "../fetchtrek-types" }
@@ -21,3 +21,5 @@ reqwest = { version = "0.12", default-features = false, features = [
 tokio-util = { version = "0.7", features = ["io"], optional = true }
 futures-util = { version = "0.3", default-features = false, optional = true }
 quick-xml = { version = "0.41", optional = true }
+aes = { version = "0.8", optional = true }
+cbc = { version = "0.1", optional = true }

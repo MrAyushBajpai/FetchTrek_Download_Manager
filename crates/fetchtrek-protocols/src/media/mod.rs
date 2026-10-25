@@ -1,11 +1,18 @@
 pub mod dash;
+pub mod decrypt;
 pub mod hls;
+pub mod muxer;
 pub mod types;
 
 use fetchtrek_types::MediaError;
 
 pub use dash::{parse_dash, parse_dash_media, parse_iso8601_duration};
+pub use decrypt::{decrypt_aes128_cbc, encrypt_aes128_cbc};
 pub use hls::parse_hls;
+pub use muxer::{
+    assemble_stream, is_ffmpeg_available, remux_dual_streams, AssemblyConfig, AssemblySummary,
+    StreamContainer,
+};
 pub use types::*;
 
 pub fn parse_media_manifest(content: &str, base_url: &str) -> Result<MediaManifest, MediaError> {
