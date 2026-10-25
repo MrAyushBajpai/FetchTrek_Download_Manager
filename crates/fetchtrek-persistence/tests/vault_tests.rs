@@ -1,15 +1,22 @@
+#[cfg(windows)]
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fetchtrek_persistence::{default_vault, CredentialVault, InMemoryVault, PersistenceError};
+use fetchtrek_persistence::{default_vault, CredentialVault, InMemoryVault};
+
+#[cfg(windows)]
+use fetchtrek_persistence::PersistenceError;
 
 #[cfg(windows)]
 use fetchtrek_persistence::{dpapi_decrypt, dpapi_encrypt, Database, DpapiVault};
 
+#[cfg(windows)]
 struct TempDbGuard {
     path: PathBuf,
 }
 
+#[cfg(windows)]
 impl TempDbGuard {
     fn new(name: &str) -> Self {
         let mut path = std::env::temp_dir();
@@ -28,6 +35,7 @@ impl TempDbGuard {
     }
 }
 
+#[cfg(windows)]
 impl Drop for TempDbGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);

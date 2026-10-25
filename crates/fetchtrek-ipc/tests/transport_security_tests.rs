@@ -23,8 +23,8 @@ fn test_endpoint_generation() {
 }
 
 #[cfg(unix)]
-#[test]
-fn test_unix_socket_symlink_attack_rejection() {
+#[tokio::test]
+async fn test_unix_socket_symlink_attack_rejection() {
     use std::os::unix::fs::symlink;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -58,8 +58,8 @@ fn test_unix_socket_symlink_attack_rejection() {
 }
 
 #[cfg(unix)]
-#[test]
-fn test_unix_socket_permissions() {
+#[tokio::test]
+async fn test_unix_socket_permissions() {
     use std::os::unix::fs::MetadataExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
