@@ -6,3 +6,6 @@ edition = "2021"
 [dependencies]
 fetchtrek-types = { path = "../../crates/fetchtrek-types" }
 fetchtrek-ipc = { path = "../../crates/fetchtrek-ipc" }
+tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "io-std", "io-util", "time"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
