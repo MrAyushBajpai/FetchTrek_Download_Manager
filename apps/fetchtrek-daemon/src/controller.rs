@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -213,6 +213,109 @@ pub fn task_staging_path(dest: &std::path::Path, task_id: i64) -> PathBuf {
     parent.join(format!(".fetchtrek_temp_{task_id}.part"))
 }
 
+/// Derives backup path `<dest>.fetchtrek_bak` in destination directory.
+pub fn task_backup_path(dest: &std::path::Path) -> PathBuf {
+    let mut bak = dest.as_os_str().to_os_string();
+    bak.push(".fetchtrek_bak");
+    PathBuf::from(bak)
+}
+
+/// Safely and atomically replaces the destination file with the staging file.
+///
+/// Implements a transactional backup-and-replace strategy:
+/// 1. If destination exists, renames destination to `<dest>.fetchtrek_bak`.
+/// 2. Renames staging file to destination.
+/// 3. If rename succeeds: unlinks the temporary backup file.
+/// 4. If rename fails: restores original destination from backup and returns an error,
+///    preserving the staging file for debugging/retry.
+pub async fn commit_staging_to_destination(
+    staging: &std::path::Path,
+    dest: &std::path::Path,
+) -> Result<(), DaemonError> {
+    commit_staging_to_destination_ext(staging, dest, false).await
+}
+
+/// Extended commit with optional simulation hook for testing rename failures.
+pub async fn commit_staging_to_destination_ext(
+    staging: &std::path::Path,
+    dest: &std::path::Path,
+    simulate_rename_err: bool,
+) -> Result<(), DaemonError> {
+    if !staging.exists() {
+        return Err(DaemonError::Internal(format!(
+            "Staging file {:?} does not exist for commit",
+            staging
+        )));
+    }
+
+    if dest.exists() {
+        let backup = task_backup_path(dest);
+        if backup.exists() {
+            tokio::fs::remove_file(&backup).await.map_err(|e| {
+                DaemonError::Internal(format!(
+                    "Failed to remove stale backup file {:?}: {}",
+                    backup, e
+                ))
+            })?;
+        }
+
+        tokio::fs::rename(dest, &backup).await.map_err(|e| {
+            DaemonError::Internal(format!(
+                "Failed to backup existing destination file {:?} to {:?}: {}",
+                dest, backup, e
+            ))
+        })?;
+
+        let rename_result = if simulate_rename_err {
+            Err(std::io::Error::other(
+                "Simulated filesystem failure during staging rename",
+            ))
+        } else {
+            tokio::fs::rename(staging, dest).await
+        };
+
+        match rename_result {
+            Ok(()) => {
+                if let Err(e) = tokio::fs::remove_file(&backup).await {
+                    eprintln!(
+                        "[fetchtrek-daemon] Warning: Failed to remove temporary backup file {:?}: {}",
+                        backup, e
+                    );
+                }
+                Ok(())
+            }
+            Err(rename_err) => {
+                // Immediately restore original destination from backup
+                if let Err(restore_err) = tokio::fs::rename(&backup, dest).await {
+                    eprintln!(
+                        "[fetchtrek-daemon] Critical: Failed to restore destination {:?} from backup {:?}: {}",
+                        dest, backup, restore_err
+                    );
+                    return Err(DaemonError::Internal(format!(
+                        "Failed to rename staging file: {}. Additionally, restoring destination from backup failed: {}",
+                        rename_err, restore_err
+                    )));
+                }
+                Err(DaemonError::Internal(format!(
+                    "Failed to rename staging file: {}",
+                    rename_err
+                )))
+            }
+        }
+    } else {
+        let rename_result = if simulate_rename_err {
+            Err(std::io::Error::other(
+                "Simulated filesystem failure during staging rename",
+            ))
+        } else {
+            tokio::fs::rename(staging, dest).await
+        };
+
+        rename_result
+            .map_err(|e| DaemonError::Internal(format!("Failed to rename staging file: {}", e)))
+    }
+}
+
 pub struct TaskController {
     pub database: Arc<std::sync::Mutex<Database>>,
     pub storage: Arc<PositionalStorage>,
@@ -224,6 +327,7 @@ pub struct TaskController {
     pub max_concurrent_tasks: usize,
     pub default_download_dir: PathBuf,
     pub transition_locks: Arc<tokio::sync::Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
+    pub simulate_rename_failure: Arc<AtomicBool>,
 }
 
 impl TaskController {
@@ -247,7 +351,13 @@ impl TaskController {
             max_concurrent_tasks,
             default_download_dir,
             transition_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            simulate_rename_failure: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn set_simulate_rename_failure(&self, simulate: bool) {
+        self.simulate_rename_failure
+            .store(simulate, Ordering::Release);
     }
 
     pub async fn acquire_task_lock(&self, task_id: i64) -> Arc<tokio::sync::Mutex<()>> {
@@ -867,27 +977,47 @@ impl TaskController {
                         let _ = db.update_task_status(task_id, TaskState::Paused);
                     }
                 } else {
-                    // Finalize staging file and atomically rename to destination path
-                    if total_bytes > 0 {
-                        controller_clone
-                            .storage
-                            .finalize_file(&staging_clone, total_bytes)
-                            .await
-                            .map_err(DaemonError::Storage)?;
-                    }
+                    // Finalize staging file and safely commit to destination path
+                    let simulate_err = controller_clone
+                        .simulate_rename_failure
+                        .load(Ordering::Acquire);
 
-                    if staging_clone.exists() {
-                        if dest_clone.exists() {
-                            let _ = tokio::fs::remove_file(&dest_clone).await;
+                    let finalize_res = async {
+                        if total_bytes > 0 {
+                            controller_clone
+                                .storage
+                                .finalize_file(&staging_clone, total_bytes)
+                                .await
+                                .map_err(DaemonError::Storage)?;
                         }
-                        tokio::fs::rename(&staging_clone, &dest_clone)
+
+                        if staging_clone.exists() {
+                            commit_staging_to_destination_ext(
+                                &staging_clone,
+                                &dest_clone,
+                                simulate_err,
+                            )
+                            .await?;
+                        }
+                        Ok::<(), DaemonError>(())
+                    }
+                    .await;
+
+                    if let Err(err) = finalize_res {
+                        eprintln!(
+                            "[fetchtrek-daemon] Task {} finalization failed: {}",
+                            task_id, err
+                        );
+                        if let Ok(db) = controller_clone.database.lock() {
+                            let _ = db.update_task_status(task_id, TaskState::Failed);
+                        }
+                        controller_clone
+                            .active_sessions
+                            .write()
                             .await
-                            .map_err(|e| {
-                                DaemonError::Internal(format!(
-                                    "Failed to rename staging file: {}",
-                                    e
-                                ))
-                            })?;
+                            .remove(&task_id);
+                        controller_clone.check_and_start_next_queued().await;
+                        return Err(err);
                     }
 
                     let final_checkpoints: Vec<SegmentCheckpoint> = cursors_for_workers

@@ -530,3 +530,195 @@ async fn test_controller_session_context_forwarding() {
         *requests
     );
 }
+
+#[tokio::test]
+async fn test_preexisting_destination_preserved_on_rename_failure() {
+    let payload = Arc::new(vec![0xAA; 16384]);
+    let (server_url, _shutdown) = start_mock_http_server(Arc::clone(&payload), 0).await;
+    let temp_dir = TempDirGuard::new("rename_fail");
+    let controller = create_test_controller(&temp_dir, 5);
+
+    // Write sentinel bytes to an existing destination file
+    let dest_path = temp_dir.path.join("preexisting_document.bin");
+    let sentinel_data = b"SENTINEL_USER_FILE_DATA_DO_NOT_CORRUPT_FT_049";
+    std::fs::write(&dest_path, sentinel_data).expect("write sentinel file");
+
+    // Enable simulated rename failure on the controller
+    controller.set_simulate_rename_failure(true);
+
+    let dest_str = dest_path.to_str().unwrap();
+    let download_url = format!("{server_url}/download.bin");
+    let record = controller
+        .add_task(
+            &download_url,
+            Some(dest_str),
+            Some("preexisting_document.bin"),
+            Some(2),
+            None,
+        )
+        .await
+        .expect("add_task should succeed");
+
+    let task_id = record.id;
+    let staging_path = fetchtrek_daemon::task_staging_path(&dest_path, task_id);
+    let backup_path = fetchtrek_daemon::task_backup_path(&dest_path);
+
+    // Wait for task to transition to Failed
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = {
+            let db = controller.database.lock().unwrap();
+            db.get_task_by_id(task_id).unwrap().unwrap().status
+        };
+        if status == TaskState::Failed {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Timed out waiting for task to fail, status was {status:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // a) The original destination file survives with identical sentinel bytes
+    assert!(
+        dest_path.exists(),
+        "Destination file MUST exist after failed rename"
+    );
+    let disk_data = std::fs::read(&dest_path).expect("read destination file");
+    assert_eq!(
+        disk_data, sentinel_data,
+        "Pre-existing destination file must remain intact and bit-identical"
+    );
+
+    // b) No orphaned or unlinked states occur
+    assert!(
+        !backup_path.exists(),
+        "No orphaned .fetchtrek_bak file must remain on disk after rollback"
+    );
+    assert!(
+        staging_path.exists(),
+        "Staging file MUST be preserved for debugging/retry"
+    );
+
+    // c) The task state transitions to Failed with active session removed
+    assert!(
+        !controller
+            .active_sessions
+            .read()
+            .await
+            .contains_key(&task_id),
+        "Failed task must be cleanly removed from active sessions"
+    );
+}
+
+#[tokio::test]
+async fn test_successful_atomic_overwrite_cleans_backup() {
+    let new_content = vec![0xBB; 32768];
+    let payload = Arc::new(new_content.clone());
+    let (server_url, _shutdown) = start_mock_http_server(Arc::clone(&payload), 0).await;
+    let temp_dir = TempDirGuard::new("atomic_overwrite");
+    let controller = create_test_controller(&temp_dir, 5);
+
+    // Create an existing destination file with old content
+    let dest_path = temp_dir.path.join("existing_overwrite_test.bin");
+    let old_content = b"OLD_CONTENT_TO_BE_OVERWRITTEN_CLEANLY_2026";
+    std::fs::write(&dest_path, old_content).expect("write old content");
+
+    let dest_str = dest_path.to_str().unwrap();
+    let download_url = format!("{server_url}/download.bin");
+    let record = controller
+        .add_task(
+            &download_url,
+            Some(dest_str),
+            Some("existing_overwrite_test.bin"),
+            Some(2),
+            None,
+        )
+        .await
+        .expect("add_task should succeed");
+
+    let task_id = record.id;
+    let staging_path = fetchtrek_daemon::task_staging_path(&dest_path, task_id);
+    let backup_path = fetchtrek_daemon::task_backup_path(&dest_path);
+
+    // Wait for task to reach Completed
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = {
+            let db = controller.database.lock().unwrap();
+            db.get_task_by_id(task_id).unwrap().unwrap().status
+        };
+        if status == TaskState::Completed {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Timed out waiting for task to complete, status was {status:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // Assert that the destination file now contains the new content
+    let disk_data = std::fs::read(&dest_path).expect("read destination file");
+    assert_eq!(
+        disk_data, new_content,
+        "Destination file must contain newly downloaded content"
+    );
+
+    // Assert that staging is unlinked
+    assert!(
+        !staging_path.exists(),
+        "Staging file must be unlinked upon successful commit"
+    );
+
+    // Assert that no .fetchtrek_bak artifact remains on disk
+    assert!(
+        !backup_path.exists(),
+        "No .fetchtrek_bak artifact must remain on disk after successful commit"
+    );
+}
+
+#[tokio::test]
+async fn test_commit_staging_to_destination_direct() {
+    let temp_dir = TempDirGuard::new("direct_commit");
+    let staging = temp_dir.path.join("file.staging");
+    let dest = temp_dir.path.join("file.final");
+    let backup = fetchtrek_daemon::task_backup_path(&dest);
+
+    // Case 1: Destination does not exist yet
+    std::fs::write(&staging, b"new_file_payload").expect("write staging");
+    fetchtrek_daemon::commit_staging_to_destination(&staging, &dest)
+        .await
+        .expect("commit without destination");
+    assert_eq!(std::fs::read(&dest).unwrap(), b"new_file_payload");
+    assert!(!staging.exists());
+    assert!(!backup.exists());
+
+    // Case 2: Destination exists, successful overwrite
+    std::fs::write(&staging, b"updated_payload").expect("write staging 2");
+    fetchtrek_daemon::commit_staging_to_destination(&staging, &dest)
+        .await
+        .expect("commit with destination");
+    assert_eq!(std::fs::read(&dest).unwrap(), b"updated_payload");
+    assert!(!staging.exists());
+    assert!(!backup.exists());
+
+    // Case 3: Destination exists, simulated rename failure rolls back to original
+    let original_bytes = b"pre_existing_data";
+    std::fs::write(&dest, original_bytes).expect("write original dest");
+    std::fs::write(&staging, b"corrupted_or_failing_staging").expect("write staging 3");
+
+    let err = fetchtrek_daemon::commit_staging_to_destination_ext(&staging, &dest, true)
+        .await
+        .expect_err("must fail when simulated error is active");
+    assert!(
+        err.to_string().contains("Failed to rename staging file"),
+        "Error should describe staging rename failure: {err}"
+    );
+
+    // Verify rollback: dest is bit-identical to original_bytes, backup cleaned up, staging preserved
+    assert_eq!(std::fs::read(&dest).unwrap(), original_bytes);
+    assert!(!backup.exists());
+    assert!(staging.exists());
+}
