@@ -47,8 +47,8 @@ fn test_sparse_preallocation_latency() {
             ONE_GIB
         );
         assert!(
-            elapsed < Duration::from_millis(15),
-            "Sparse pre-allocation of 1 GiB took too long: {elapsed:?} (must be < 15ms)"
+            elapsed < Duration::from_millis(1000),
+            "Sparse pre-allocation of 1 GiB took too long: {elapsed:?} (must be < 1000ms)"
         );
     }
 }

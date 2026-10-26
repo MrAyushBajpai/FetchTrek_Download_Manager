@@ -44,39 +44,11 @@ fn apply_sparse_hint(file: &File, _total_bytes: u64) {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn apply_sparse_hint(file: &File, total_bytes: u64) {
-    use std::os::unix::io::AsRawFd;
-
-    let fd = file.as_raw_fd();
-    unsafe {
-        libc::fallocate(fd, libc::FALLOC_FL_KEEP_SIZE, 0, total_bytes as libc::off_t);
-    }
+#[cfg(not(windows))]
+fn apply_sparse_hint(_file: &File, _total_bytes: u64) {
+    // On Unix platforms (Linux, macOS), standard POSIX ftruncate (invoked via File::set_len)
+    // natively creates sparse file holes in O(1) time without allocating physical disk extents.
 }
-
-#[cfg(target_os = "macos")]
-fn apply_sparse_hint(file: &File, total_bytes: u64) {
-    use std::os::unix::io::AsRawFd;
-
-    let fd = file.as_raw_fd();
-    let mut fstore = libc::fstore_t {
-        fst_flags: libc::F_ALLOCATEALL,
-        fst_posmode: libc::F_PEOFPOSMODE,
-        fst_offset: 0,
-        fst_length: total_bytes as libc::off_t,
-        fst_bytesalloc: 0,
-    };
-
-    unsafe {
-        if libc::fcntl(fd, libc::F_PREALLOCATE, &mut fstore) == -1 {
-            fstore.fst_flags = 0;
-            libc::fcntl(fd, libc::F_PREALLOCATE, &mut fstore);
-        }
-    }
-}
-
-#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-fn apply_sparse_hint(_file: &File, _total_bytes: u64) {}
 
 fn map_io_error(err: std::io::Error) -> StorageError {
     match err.kind() {
